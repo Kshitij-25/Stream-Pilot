@@ -26,6 +26,17 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSBonjourServices</key>
+	<array/>
+	<key>NSCameraUsageDescription</key>
+	<string>The camera is used only to scan the pairing QR code shown by the DeckPad companion on your PC.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>DeckPad connects to the companion app running on your PC over your local network.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

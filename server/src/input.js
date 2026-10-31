@@ -84,6 +84,21 @@ public class Vol {
 "@
 $volOk = $true
 } catch { }
+$fgOk = $false
+try {
+Add-Type -TypeDefinition @"
+using System; using System.Runtime.InteropServices;
+public class Fg {
+  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  public static string Name() {
+    uint pid; GetWindowThreadProcessId(GetForegroundWindow(), out pid);
+    try { return System.Diagnostics.Process.GetProcessById((int)pid).ProcessName + ".exe"; } catch { return ""; }
+  }
+}
+"@
+$fgOk = $true
+} catch { }
 $out = New-Object System.IO.StreamWriter([Console]::OpenStandardOutput())
 $out.AutoFlush = $true
 while (($line = [Console]::In.ReadLine()) -ne $null) {
@@ -92,6 +107,7 @@ while (($line = [Console]::In.ReadLine()) -ne $null) {
     switch ($p[0]) {
       'V' { if ($volOk) { switch ($p[1]) { 'set' { [Vol]::Set([single]$p[2]) } 'delta' { [Vol]::Delta([single]$p[2]) } 'mute' { [Vol]::Mute($p[2] -eq '1') } 'toggle' { [Vol]::Toggle() } } } }
       'Q' { if ($volOk) { $out.WriteLine('STAT ' + [Vol]::Get()) } }
+      'F' { if ($fgOk) { $out.WriteLine('FG ' + [Fg]::Name()) } }
       'D' { [K]::keybd_event([byte][int]$p[1], 0, [uint32][int]$p[2], [UIntPtr]::Zero) }
       'U' { [K]::keybd_event([byte][int]$p[1], 0, ([uint32][int]$p[2] -bor 2), [UIntPtr]::Zero) }
       'T' { [System.Windows.Forms.SendKeys]::SendWait([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($p[1]))) }
@@ -124,8 +140,21 @@ class WindowsInput {
         buf = buf.slice(i + 1);
         const m = /^STAT ([\d.eE+-]+) ([01])$/.exec(line);
         if (m) this.audio = { volume: Math.round(parseFloat(m[1]) * 100), muted: m[2] === '1' };
+        const f = /^FG (.*)$/.exec(line);
+        if (f) {
+          this.foreground = f[1];
+          if (this.onForeground) this.onForeground(f[1]);
+        }
       }
     });
+  }
+
+  /** Last known foreground process (e.g. "obs64.exe"); refreshed by queryForeground(). */
+  foreground = '';
+  onForeground = null;
+
+  queryForeground() {
+    this._send(['F']);
   }
 
   /** Last known system audio state (refreshed by query()). */
@@ -177,7 +206,10 @@ class WindowsInput {
 
 class UnsupportedInput {
   audio = null;
+  foreground = '';
+  onForeground = null;
   query() {}
+  queryForeground() {}
   setVolume() {
     return this.hotkey();
   }

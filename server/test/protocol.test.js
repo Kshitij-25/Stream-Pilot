@@ -10,7 +10,7 @@ const WebSocket = require('ws');
 const PORT = 18765;
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'deckpad-test-'));
 const srv = spawn('node', [path.join(__dirname, '..', 'src', 'index.js')], {
-  env: { ...process.env, DECKPAD_PORT: String(PORT), DECKPAD_HOME: home },
+  env: { ...process.env, DECKPAD_PORT: String(PORT), DECKPAD_HOME: home, DECKPAD_NO_ICONS: '1', DECKPAD_DISCOVERY_PORT: '18766' },
 });
 let out = '';
 srv.stdout.on('data', (d) => (out += d));
@@ -55,7 +55,7 @@ function client() {
   c.sendj({ t: 'hello', pin, name: 'test phone' });
   m = await c.next();
   assert.strictEqual(m.t, 'welcome'); assert.ok(m.token);
-  assert.ok(m.config.pages.streaming.buttons[0]);
+  assert.ok(m.config.pages.stream.buttons[0]);
   const token = m.token;
   console.log('ok pairing');
 
@@ -72,12 +72,12 @@ function client() {
 
   // edit config: add a command button, broadcast to other client
   const cfg = m.config;
-  cfg.pages.streaming.buttons[10] = { id: 'testbtn', label: 'T', icon: 'x', color: '#000', action: { type: 'command', command: 'echo hi' } };
-  cfg.pages.streaming.buttons[9] = { id: 'bad', label: 'B', icon: 'x', color: '#000', action: { type: 'command', command: 'exit 3' } };
-  cfg.pages.streaming.buttons[8] = { id: 'macro', label: 'M', icon: 'x', color: '#000', action: { type: 'multi', actions: [{ type: 'delay', ms: 50 }, { type: 'command', command: 'echo a' }] } };
+  cfg.pages.stream.buttons[10] = { id: 'testbtn', label: 'T', icon: 'x', color: '#000', action: { type: 'command', command: 'echo hi' } };
+  cfg.pages.stream.buttons[9] = { id: 'bad', label: 'B', icon: 'x', color: '#000', action: { type: 'command', command: 'exit 3' } };
+  cfg.pages.stream.buttons[8] = { id: 'macro', label: 'M', icon: 'x', color: '#000', action: { type: 'multi', actions: [{ type: 'delay', ms: 50 }, { type: 'command', command: 'echo a' }] } };
   c.sendj({ t: 'saveConfig', config: cfg });
   m = await c3.next((x) => x.t === 'config');
-  assert.strictEqual(m.config.pages.streaming.buttons[10].id, 'testbtn');
+  assert.strictEqual(m.config.pages.stream.buttons[10].id, 'testbtn');
   console.log('ok config broadcast');
 
   c3.sendj({ t: 'press', id: 'testbtn', rid: 1 });
@@ -102,8 +102,8 @@ function client() {
   // toggle + cycle state
   const cfg2 = JSON.parse(JSON.stringify(cfg));
   const cmd = (c) => ({ type: 'command', command: c });
-  cfg2.pages.streaming.buttons[12] = { id: 'tog', label: 'T', icon: 'x', color: '#000', action: { type: 'toggle', on: cmd('echo on'), off: cmd('echo off') } };
-  cfg2.pages.streaming.buttons[11] = { id: 'cyc', label: 'C', icon: 'x', color: '#000', action: { type: 'cycle', actions: [cmd('echo 1'), cmd('exit 9')] } };
+  cfg2.pages.stream.buttons[12] = { id: 'tog', label: 'T', icon: 'x', color: '#000', action: { type: 'toggle', on: cmd('echo on'), off: cmd('echo off') } };
+  cfg2.pages.stream.buttons[11] = { id: 'cyc', label: 'C', icon: 'x', color: '#000', action: { type: 'cycle', actions: [cmd('echo 1'), cmd('exit 9')] } };
   c3.sendj({ t: 'saveConfig', config: cfg2 });
   await c3.next((x) => x.t === 'config');
   c3.sendj({ t: 'press', id: 'tog', rid: 20 });
@@ -136,8 +136,8 @@ function client() {
   }
 
   // persisted
-  const saved = JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8'));
-  assert.strictEqual(saved.pages.streaming.buttons[10].id, 'testbtn');
+  const saved = JSON.parse(fs.readFileSync(path.join(home, 'profiles', 'streaming.json'), 'utf8')).config;
+  assert.strictEqual(saved.pages.stream.buttons[10].id, 'testbtn');
   console.log('ok persistence');
   console.log('ALL PASSED');
 })()

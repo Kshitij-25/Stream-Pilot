@@ -13,6 +13,8 @@ class DeckTile extends StatefulWidget {
   final bool busy;
   final bool error;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+  final VoidCallback? onDoubleTap;
 
   const DeckTile({
     super.key,
@@ -22,6 +24,8 @@ class DeckTile extends StatefulWidget {
     required this.busy,
     required this.error,
     required this.onTap,
+    this.onLongPress,
+    this.onDoubleTap,
   });
 
   @override
@@ -67,6 +71,8 @@ class _DeckTileState extends State<DeckTile> {
       onTapUp: (_) => setState(() => _down = false),
       onTapCancel: () => setState(() => _down = false),
       onTap: widget.onTap,
+      onLongPress: widget.editing ? null : widget.onLongPress,
+      onDoubleTap: widget.editing ? null : widget.onDoubleTap,
       child: AnimatedScale(
         scale: _down ? 0.94 : 1,
         duration: const Duration(milliseconds: 80),
@@ -131,6 +137,14 @@ class _DeckTileState extends State<DeckTile> {
 }
 
 String _two(int n) => n.toString().padLeft(2, '0');
+
+String _rate(int? bytesPerSec) {
+  if (bytesPerSec == null) return '--';
+  final bits = bytesPerSec * 8;
+  if (bits >= 1000000) return '${(bits / 1000000).toStringAsFixed(1)} Mb/s';
+  if (bits >= 1000) return '${(bits / 1000).round()} kb/s';
+  return '$bits b/s';
+}
 
 String formatElapsed(int ms) {
   final s = (ms ~/ 1000).clamp(0, 359999);
@@ -201,6 +215,42 @@ class _LiveWidgetState extends State<LiveWidget> {
         final s = conn.obs.recordStart;
         value = s == null ? '--:--:--' : formatElapsed(conn.serverNow - s);
         if (caption.isEmpty) caption = conn.obs.recording ? 'REC' : 'Not recording';
+        break;
+      case 'gpu':
+        value = conn.stats.gpu == null ? 'n/a' : '${conn.stats.gpu}%';
+        if (caption.isEmpty) caption = 'GPU';
+        break;
+      case 'netDown':
+        value = _rate(conn.stats.netDown);
+        if (caption.isEmpty) caption = 'Download';
+        break;
+      case 'netUp':
+        value = _rate(conn.stats.netUp);
+        if (caption.isEmpty) caption = 'Upload';
+        break;
+      case 'obsFps':
+        value = conn.stats.obsFps == null ? '--' : '${conn.stats.obsFps}';
+        if (caption.isEmpty) caption = 'OBS FPS';
+        break;
+      case 'dropped':
+        value = conn.stats.dropped == null ? '--' : '${conn.stats.dropped}';
+        if (caption.isEmpty) caption = 'Dropped';
+        break;
+      case 'bitrate':
+        value = conn.stats.bitrate == null ? '--' : '${conn.stats.bitrate}';
+        if (caption.isEmpty) caption = 'kbps';
+        break;
+      case 'twitchViewers':
+        value = '${conn.stats.twitch['viewers'] ?? '--'}';
+        if (caption.isEmpty) caption = 'Twitch viewers';
+        break;
+      case 'twitchFollowers':
+        value = '${conn.stats.twitch['followers'] ?? '--'}';
+        if (caption.isEmpty) caption = 'Followers';
+        break;
+      case 'ytViewers':
+        value = '${conn.stats.youtube['viewers'] ?? '--'}';
+        if (caption.isEmpty) caption = 'YouTube viewers';
         break;
       default:
         value = '?';

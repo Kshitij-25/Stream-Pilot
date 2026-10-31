@@ -6,6 +6,8 @@ import '../models.dart';
 import '../widgets/deck_icon.dart';
 import '../widgets/deck_tile.dart';
 import '../widgets/page_dialog.dart';
+import '../tools/tools.dart';
+import 'dart:async';
 import 'button_editor.dart';
 import 'settings_screen.dart';
 
@@ -23,11 +25,30 @@ class _DeckScreenState extends State<DeckScreen> {
   final Map<String, String> _errors = {};
   String? _flashId;
   String? _appliedOrientation;
+  StreamSubscription? _eventSub;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final o = ConnScope.of(context).orientation;
+    final conn0 = ConnScope.of(context);
+    _eventSub ??= conn0.eventStream.listen((e) {
+      if (!mounted || !conn0.notifications) return;
+      if (conn0.haptics) HapticFeedback.mediumImpact();
+      final detail = (e['detail'] ?? '') as String;
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(SnackBar(
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 4),
+          content: Row(children: [
+            const Icon(Icons.notifications_active, size: 18),
+            const SizedBox(width: 10),
+            Expanded(child: Text('${e['title']}${detail.isEmpty ? '' : '\n$detail'}', maxLines: 3, overflow: TextOverflow.ellipsis)),
+          ]),
+          action: SnackBarAction(label: 'Events', onPressed: () => openTool(context, 'events')),
+        ));
+    });
+    final o = conn0.orientation;
     if (o == _appliedOrientation) return;
     _appliedOrientation = o;
     SystemChrome.setPreferredOrientations(switch (o) {
@@ -40,6 +61,7 @@ class _DeckScreenState extends State<DeckScreen> {
 
   @override
   void dispose() {
+    _eventSub?.cancel();
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
@@ -81,12 +103,20 @@ class _DeckScreenState extends State<DeckScreen> {
         return;
       case 'widget':
         return;
+      case 'screen':
+        openTool(context, '${b.action['screen']}');
+        return;
     }
+    await _fire(conn, b, 'tap');
+  }
+
+  Future<void> _fire(DeckConnection conn, DeckButton b, String kind) async {
+    if (kind != 'tap' && conn.haptics) HapticFeedback.mediumImpact();
     setState(() {
       _errors.remove(b.id);
       _flashId = b.id;
     });
-    final err = await conn.press(b);
+    final err = await conn.press(b, kind: kind);
     if (!mounted) return;
     setState(() => _flashId = null);
     if (err != null) {
@@ -152,6 +182,14 @@ class _DeckScreenState extends State<DeckScreen> {
             ),
           )
         : null;
+    final outdated = conn.outdatedCompanion
+        ? Container(
+            width: double.infinity,
+            color: Colors.red.shade900,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            child: const Text('Your PC companion is outdated. Close it, update the server folder and restart it (npm start) to get volume, integrations and the new screens.', style: TextStyle(fontSize: 11)),
+          )
+        : null;
     final offline = !conn.connected
         ? Container(
             width: double.infinity,
@@ -194,7 +232,7 @@ class _DeckScreenState extends State<DeckScreen> {
                     obs: conn.obs,
                     offline: !conn.connected,
                   ),
-                  Expanded(child: Column(children: [?offline, ?hint, Expanded(child: grid)])),
+                  Expanded(child: Column(children: [?outdated, ?offline, ?hint, Expanded(child: grid)])),
                 ])
               : Column(children: [
                   _TopBar(
@@ -208,6 +246,7 @@ class _DeckScreenState extends State<DeckScreen> {
                     offline: !conn.connected,
                   ),
                   SizedBox(height: 54, child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 8), children: tabs)),
+                  ?outdated,
                   ?offline,
                   ?hint,
                   Expanded(child: grid),
@@ -226,6 +265,8 @@ class _DeckScreenState extends State<DeckScreen> {
       busy: b != null && _flashId == b.id,
       error: b != null && _errors.containsKey(b.id),
       onTap: () => _tap(conn, cfg, pageId, slot),
+      onLongPress: b?.longAction == null ? null : () => _fire(conn, b!, 'long'),
+      onDoubleTap: b?.doubleAction == null ? null : () => _fire(conn, b!, 'double'),
     );
     if (!_editing) return tile;
 
@@ -377,6 +418,15 @@ class _Rail extends StatelessWidget {
           Expanded(child: ListView(padding: EdgeInsets.zero, children: tabs)),
           if (obs.streaming) const _Badge('LIVE', Colors.red),
           if (obs.recording) const _Badge('REC', Colors.pink),
+          Builder(builder: (context) {
+            final conn = ConnScope.of(context);
+            return TextButton.icon(
+              style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 6), minimumSize: const Size(0, 30), visualDensity: VisualDensity.compact),
+              onPressed: () => showProfileSheet(context),
+              icon: Icon(conn.following ? Icons.layers : Icons.push_pin, size: 14),
+              label: Text(conn.profileName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10)),
+            );
+          }),
           Row(mainAxisAlignment: MainAxisAlignment.center, children: [
             IconButton(
               icon: Icon(editing ? Icons.check_circle : Icons.edit_outlined),
@@ -429,6 +479,7 @@ class _TopBar extends StatelessWidget {
           if (obs.streaming) const _Badge('LIVE', Colors.red),
           if (obs.recording) const _Badge('REC', Colors.pink),
           if (!obs.connected && !offline) const _Badge('OBS offline', Colors.grey),
+          IconButton(icon: const Icon(Icons.layers_outlined), tooltip: 'Profile', onPressed: () => showProfileSheet(context)),
           IconButton(
             icon: Icon(editing ? Icons.check_circle : Icons.edit_outlined),
             tooltip: editing ? 'Done editing' : 'Edit buttons',

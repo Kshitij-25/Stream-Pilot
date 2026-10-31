@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform;
+import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -11,7 +11,17 @@ import 'models.dart';
 
 enum LinkStatus { idle, connecting, connected, reconnecting, failed }
 
-/// Owns the WebSocket link to the PC companion, plus the synced deck config and OBS state.
+/// Protocol version this app needs from the PC companion (older companions lack features).
+const requiredProtocol = 3;
+
+class FoundPc {
+  final String name;
+  final String host;
+  final int port;
+  FoundPc(this.name, this.host, this.port);
+}
+
+/// Owns the WebSocket link to the PC companion, plus the synced deck config and live state.
 class DeckConnection extends ChangeNotifier {
   late final SharedPreferences _prefs;
 
@@ -21,34 +31,54 @@ class DeckConnection extends ChangeNotifier {
   int port = 8765;
   String? token;
   String hostName = '';
+  int protocol = 0;
   DeckConfig? config;
   ObsState obs = ObsState();
   ObsSettings obsSettings = ObsSettings();
   SystemStats stats = SystemStats();
   Map<String, bool> toggles = {};
+  Json integrations = {};
+  final List<Json> perfHistory = [];
+
+  // Profiles
+  String profileId = '';
+  String profileName = '';
+  List<Json> profiles = [];
+  bool following = true; // follow the PC's active profile (auto-switching) vs. pinned to one
+  String? pinnedProfile;
+
   int _clockOffset = 0; // server ms minus phone ms
 
   /// 'landscape' | 'portrait' | 'auto'
   String orientation = 'landscape';
-
   bool haptics = true;
   bool keepAwake = true;
+  bool notifications = true;
+
+  final _events = StreamController<Json>.broadcast();
+  final _chat = StreamController<Json>.broadcast();
+  final _history = StreamController<Json>.broadcast();
+  Stream<Json> get eventStream => _events.stream;
+  Stream<Json> get chatStream => _chat.stream;
+  Stream<Json> get historyStream => _history.stream;
 
   WebSocketChannel? _ch;
   StreamSubscription? _sub;
   Timer? _retryTimer;
   Timer? _pingTimer;
   DateTime _lastRx = DateTime.now();
-  bool _want = false; // user wants to be connected
-  bool _persist = false; // keep retrying forever (we hold a valid token)
+  bool _want = false;
+  bool _persist = false;
   int _attempt = 0;
   int _rid = 0;
   String? _pin;
   final _pending = <int, Completer<String?>>{};
+  final _rpc = <int, Completer<dynamic>>{};
   Completer<Map<String, List<String>>>? _listing;
 
   bool get connected => status == LinkStatus.connected;
   bool get hasSavedServer => host.isNotEmpty && token != null;
+  bool get outdatedCompanion => connected && protocol < requiredProtocol;
 
   String get _deviceName => Platform.isIOS ? 'iPhone / iPad' : 'Android device';
 
@@ -58,8 +88,10 @@ class DeckConnection extends ChangeNotifier {
     port = _prefs.getInt('port') ?? 8765;
     token = _prefs.getString('token');
     haptics = _prefs.getBool('haptics') ?? true;
-    orientation = _prefs.getString('orientation') ?? 'landscape';
     keepAwake = _prefs.getBool('keepAwake') ?? true;
+    notifications = _prefs.getBool('notifications') ?? true;
+    orientation = _prefs.getString('orientation') ?? 'landscape';
+    pinnedProfile = _prefs.getString('profile');
     final cached = _prefs.getString('config');
     if (cached != null) {
       try {
@@ -71,9 +103,16 @@ class DeckConnection extends ChangeNotifier {
     }
   }
 
+  // ---------- preferences ----------
   void setHaptics(bool v) {
     haptics = v;
     _prefs.setBool('haptics', v);
+    notifyListeners();
+  }
+
+  void setNotifications(bool v) {
+    notifications = v;
+    _prefs.setBool('notifications', v);
     notifyListeners();
   }
 
@@ -83,13 +122,31 @@ class DeckConnection extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Current time on the PC (for stream timers that must not drift with phone clock).
+  void setKeepAwake(bool v) {
+    keepAwake = v;
+    _prefs.setBool('keepAwake', v);
+    _applyWakelock();
+    notifyListeners();
+  }
+
+  void _applyWakelock() {
+    try {
+      if (keepAwake && connected) {
+        unawaited(WakelockPlus.enable().catchError((_) {}));
+      } else {
+        unawaited(WakelockPlus.disable().catchError((_) {}));
+      }
+    } catch (_) {}
+  }
+
+  /// Current time on the PC (for timers that must not drift with the phone clock).
   int get serverNow => DateTime.now().millisecondsSinceEpoch + _clockOffset;
 
   void _syncClock(dynamic now) {
     if (now is num) _clockOffset = now.toInt() - DateTime.now().millisecondsSinceEpoch;
   }
 
+  // ---------- dynamic state ----------
   /// Whether a button should currently show its "active" look.
   bool isActive(DeckButton b) {
     final a = b.action;
@@ -111,33 +168,28 @@ class DeckConnection extends ChangeNotifier {
         }
         return false;
       case 'volume':
-        return (a['op'] == 'toggleMute' || a['op'] == 'mute') && stats.muted;
+        return a['app'] == null && (a['op'] == 'toggleMute' || a['op'] == 'mute') && stats.muted;
+      case 'discord':
+        if (stats.discord['connected'] != true) return false;
+        switch (a['op']) {
+          case 'toggleMute':
+          case 'mute':
+            return stats.discord['mute'] == true;
+          case 'toggleDeafen':
+          case 'deafen':
+            return stats.discord['deaf'] == true;
+        }
+        return false;
+      case 'twitch':
+        if (a['op'] == 'chatMode') return ((stats.twitch['modes'] ?? {}) as Map)[a['mode']] == true;
+        return false;
     }
     return false;
   }
 
-  void setKeepAwake(bool v) {
-    keepAwake = v;
-    _prefs.setBool('keepAwake', v);
-    _applyWakelock();
-    notifyListeners();
-  }
-
-  void _applyWakelock() {
-    try {
-      if (keepAwake && connected) {
-        WakelockPlus.enable();
-      } else {
-        WakelockPlus.disable();
-      }
-    } catch (_) {}
-  }
-
+  // ---------- connecting ----------
   Future<void> connect({required String host, required int port, String? pin}) async {
-    if (host != this.host || port != this.port) {
-      // A different PC: the old token is useless for it.
-      token = host == this.host ? token : null;
-    }
+    if (host != this.host) token = null; // a different PC: the old token is useless for it
     this.host = host;
     this.port = port;
     _pin = pin;
@@ -166,8 +218,9 @@ class DeckConnection extends ChangeNotifier {
       _send({
         't': 'hello',
         'name': _deviceName,
-        if (token != null) 'token': token,
-        if (_pin != null) 'pin': _pin,
+        'token': ?token,
+        'pin': ?_pin,
+        'profile': pinnedProfile,
       });
       _pingTimer = Timer.periodic(const Duration(seconds: 8), (_) {
         if (DateTime.now().difference(_lastRx) > const Duration(seconds: 22)) {
@@ -194,6 +247,10 @@ class DeckConnection extends ChangeNotifier {
       if (!c.isCompleted) c.complete('Disconnected');
     }
     _pending.clear();
+    for (final c in _rpc.values) {
+      if (!c.isCompleted) c.completeError('Disconnected');
+    }
+    _rpc.clear();
   }
 
   void _onClosed(WebSocketChannel? ch) {
@@ -236,21 +293,29 @@ class DeckConnection extends ChangeNotifier {
         _persist = true;
         _attempt = 0;
         error = null;
+        protocol = (m['protocol'] as num?)?.toInt() ?? 1;
         hostName = (m['host']?['name'] ?? host) as String;
-        _setConfig(m['config'] as Json);
+        _applyConfigMessage(m);
         _syncClock(m['now']);
         obs = ObsState.fromJson(m['state'] as Json?);
         toggles = _toggles(m['toggles']);
         stats = SystemStats.fromJson(m['stats'] as Json?);
+        integrations = Map<String, dynamic>.from((m['integrations'] ?? {}) as Map);
         obsSettings = ObsSettings.fromJson(m['obs'] as Json?);
         status = LinkStatus.connected;
         _applyWakelock();
         notifyListeners();
+        unawaited(rpc('perf.history').then((h) {
+          perfHistory
+            ..clear()
+            ..addAll((h as List).map((e) => Map<String, dynamic>.from(e as Map)));
+          notifyListeners();
+        }).catchError((_) {}));
         break;
       case 'authFail':
         error = (m['reason'] ?? 'Authentication failed') as String;
         if (m['needPin'] == true) {
-          // Server no longer knows this device (e.g. its settings were reset).
+          // Server no longer knows this device (e.g. it was revoked or settings were reset).
           token = null;
           _prefs.remove('token');
           error = 'This PC no longer recognises the app. Enter the new PIN to pair again.';
@@ -262,7 +327,7 @@ class DeckConnection extends ChangeNotifier {
         notifyListeners();
         break;
       case 'config':
-        _setConfig(m['config'] as Json);
+        _applyConfigMessage(m);
         notifyListeners();
         break;
       case 'state':
@@ -274,7 +339,22 @@ class DeckConnection extends ChangeNotifier {
       case 'stats':
         _syncClock(m['now']);
         stats = SystemStats.fromJson(m['stats'] as Json?);
+        perfHistory.add({'t': m['now'], ...Map<String, dynamic>.from(m['stats'] as Map)});
+        if (perfHistory.length > 90) perfHistory.removeAt(0);
         notifyListeners();
+        break;
+      case 'integrations':
+        integrations = Map<String, dynamic>.from(m['status'] as Map);
+        notifyListeners();
+        break;
+      case 'notify':
+        _events.add(Map<String, dynamic>.from(m['event'] as Map));
+        break;
+      case 'chat':
+        _chat.add(Map<String, dynamic>.from(m['msg'] as Map));
+        break;
+      case 'history':
+        _history.add(Map<String, dynamic>.from(m['entry'] as Map));
         break;
       case 'obsSettings':
         obsSettings = ObsSettings.fromJson(m['obs'] as Json?);
@@ -286,6 +366,16 @@ class DeckConnection extends ChangeNotifier {
           'inputs': List<String>.from(m['inputs'] as List),
         });
         _listing = null;
+        break;
+      case 'rpcResult':
+        final c = _rpc.remove(m['rid'] as int?);
+        if (c != null) {
+          if (m['ok'] == true) {
+            c.complete(m['data']);
+          } else {
+            c.completeError((m['error'] ?? 'Failed') as String);
+          }
+        }
         break;
       case 'result':
         final rid = m['rid'] as int?;
@@ -300,13 +390,21 @@ class DeckConnection extends ChangeNotifier {
     }
   }
 
-  Map<String, bool> _toggles(dynamic j) =>
-      {for (final e in ((j ?? {}) as Map).entries) e.key as String: e.value == true};
-
-  void _setConfig(Json j) {
+  void _applyConfigMessage(Json m) {
+    final j = m['config'] as Json;
     config = DeckConfig.fromJson(j);
     _prefs.setString('config', jsonEncode(j));
+    final p = m['profile'] as Map?;
+    if (p != null) {
+      profileId = p['id'] as String;
+      profileName = p['name'] as String;
+    }
+    profiles = [for (final x in (m['profiles'] as List? ?? const [])) Map<String, dynamic>.from(x as Map)];
+    following = m['following'] != false;
   }
+
+  Map<String, bool> _toggles(dynamic j) =>
+      {for (final e in ((j ?? {}) as Map).entries) e.key as String: e.value == true};
 
   void _send(Json m) {
     try {
@@ -323,8 +421,21 @@ class DeckConnection extends ChangeNotifier {
     return c.future.timeout(const Duration(seconds: 40), onTimeout: () => 'Timed out');
   }
 
-  /// Returns null on success, or an error message.
-  Future<String?> press(DeckButton b) => _request({'t': 'press', 'id': b.id});
+  /// Generic request/response call to the companion. Throws a String message on failure.
+  Future<dynamic> rpc(String method, [Json params = const {}]) {
+    if (!connected) return Future.error('Not connected to your PC');
+    final rid = ++_rid;
+    final c = Completer<dynamic>();
+    _rpc[rid] = c;
+    _send({'t': 'rpc', 'rid': rid, 'method': method, 'params': params});
+    return c.future.timeout(const Duration(seconds: 60), onTimeout: () {
+      _rpc.remove(rid);
+      throw 'Timed out';
+    });
+  }
+
+  /// [kind] is 'tap', 'long' or 'double'. Returns null on success, or an error message.
+  Future<String?> press(DeckButton b, {String kind = 'tap'}) => _request({'t': 'press', 'id': b.id, 'kind': kind});
   Future<String?> runAction(Json action) => _request({'t': 'run', 'action': action});
 
   /// Edits a copy of the config, applies it immediately, and syncs it to the PC.
@@ -336,6 +447,17 @@ class DeckConnection extends ChangeNotifier {
     _prefs.setString('config', jsonEncode(cfg.toJson()));
     notifyListeners();
     _send({'t': 'saveConfig', 'config': cfg.toJson()});
+  }
+
+  /// Pin this phone to a profile, or pass null to follow the PC's active profile (auto-switching).
+  void selectProfile(String? id) {
+    pinnedProfile = id;
+    if (id == null) {
+      _prefs.remove('profile');
+    } else {
+      _prefs.setString('profile', id);
+    }
+    _send({'t': 'selectProfile', 'id': id});
   }
 
   void saveObsSettings({required String host, required int port, String? password}) {
@@ -374,6 +496,49 @@ class DeckConnection extends ChangeNotifier {
     await _prefs.remove('token');
     await _prefs.remove('config');
     notifyListeners();
+  }
+
+  /// Finds companions on the local network (UDP broadcast on port 8766).
+  static Future<List<FoundPc>> discover({Duration timeout = const Duration(milliseconds: 1800), int port = 8766}) async {
+    final found = <String, FoundPc>{};
+    RawDatagramSocket? sock;
+    try {
+      sock = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+      sock.broadcastEnabled = true;
+      sock.listen((e) {
+        if (e != RawSocketEvent.read) return;
+        final d = sock!.receive();
+        if (d == null) return;
+        try {
+          final j = jsonDecode(utf8.decode(d.data)) as Map;
+          if (j['app'] != 'deckpad') return;
+          final addrs = [for (final a in (j['addresses'] as List? ?? const [])) a as String];
+          final h = addrs.contains(d.address.address) || addrs.isEmpty ? d.address.address : addrs.first;
+          found['$h:${j['port']}'] = FoundPc((j['name'] ?? h) as String, h, (j['port'] as num).toInt());
+        } catch (_) {}
+      });
+      final msg = utf8.encode('DECKPAD?');
+      final targets = <InternetAddress>{InternetAddress('255.255.255.255'), InternetAddress.loopbackIPv4};
+      try {
+        for (final i in await NetworkInterface.list(type: InternetAddressType.IPv4)) {
+          for (final a in i.addresses) {
+            final p = a.address.split('.');
+            if (p.length == 4) targets.add(InternetAddress('${p[0]}.${p[1]}.${p[2]}.255'));
+          }
+        }
+      } catch (_) {}
+      for (final t in targets) {
+        try {
+          sock.send(msg, t, port);
+        } catch (_) {}
+      }
+      await Future.delayed(timeout);
+    } catch (_) {
+      // discovery is best-effort
+    } finally {
+      sock?.close();
+    }
+    return found.values.toList();
   }
 }
 

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../connection.dart';
 import '../widgets/page_dialog.dart';
+import '../tools/tools.dart';
+import '../models.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -136,6 +138,64 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onTap: () => showPageEditor(context, conn),
           ),
           const Divider(),
+          const _Header('Tools'),
+          ...toolTiles(context),
+          const Divider(),
+          const _Header('Profiles'),
+          ListTile(
+            leading: Icon(conn.following ? Icons.layers : Icons.push_pin),
+            title: Text('This phone shows: ${conn.profileName}'),
+            subtitle: Text(conn.following ? 'Following the PC (automations can switch it)' : 'Pinned to this phone'),
+            onTap: () => showProfileSheet(context),
+          ),
+          for (final p in conn.profiles)
+            ListTile(
+              dense: true,
+              title: Text(p['name'] as String),
+              trailing: PopupMenuButton<String>(
+                onSelected: (v) async {
+                  final id = p['id'] as String;
+                  try {
+                    if (v == 'active') {
+                      await conn.rpc('profiles.setActive', {'id': id});
+                    } else if (v == 'rename') {
+                      final n = await promptText(context, 'Rename profile', initial: p['name'] as String);
+                      if (n != null && n.isNotEmpty) await conn.rpc('profiles.rename', {'id': id, 'name': n});
+                    } else if (v == 'duplicate') {
+                      final n = await promptText(context, 'Name for the copy', initial: '${p['name']} copy');
+                      if (n != null && n.isNotEmpty) await conn.rpc('profiles.create', {'name': n, 'from': id});
+                    } else if (v == 'delete') {
+                      if (await _confirm('Delete "${p['name']}"?', 'Its layout is removed from the PC.')) await conn.rpc('profiles.delete', {'id': id});
+                    }
+                  } catch (e) {
+                    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+                  }
+                },
+                itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'active', child: Text('Make active on the PC')),
+                  PopupMenuItem(value: 'rename', child: Text('Rename')),
+                  PopupMenuItem(value: 'duplicate', child: Text('Duplicate')),
+                  PopupMenuItem(value: 'delete', child: Text('Delete')),
+                ],
+              ),
+            ),
+          ListTile(
+            leading: const Icon(Icons.add),
+            title: const Text('New profile (copy of this one)'),
+            onTap: () async {
+              final n = await promptText(context, 'Profile name');
+              if (n == null || n.isEmpty) return;
+              try {
+                await conn.rpc('profiles.create', {'name': n, 'from': conn.profileId});
+              } catch (e) {
+                if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+              }
+            },
+          ),
+          const Divider(),
+          const _Header('Connected devices'),
+          const _Devices(),
+          const Divider(),
           const _Header('OBS Studio'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -186,6 +246,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const _Header('App'),
           SwitchListTile(title: const Text('Haptic feedback'), value: conn.haptics, onChanged: conn.setHaptics),
           SwitchListTile(
+            title: const Text('Event notifications'),
+            subtitle: const Text('Pop-ups for follows, subs, raids, clips…'),
+            value: conn.notifications,
+            onChanged: conn.setNotifications,
+          ),
+          SwitchListTile(
             title: const Text('Keep screen on'),
             subtitle: const Text('Stops the phone sleeping while the deck is open'),
             value: conn.keepAwake,
@@ -228,4 +294,58 @@ class _Header extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
         child: Text(text, style: Theme.of(context).textTheme.labelLarge?.copyWith(color: Theme.of(context).colorScheme.primary)),
       );
+}
+
+class _Devices extends StatefulWidget {
+  const _Devices();
+
+  @override
+  State<_Devices> createState() => _DevicesState();
+}
+
+class _DevicesState extends State<_Devices> {
+  List<Json>? _devices;
+  String? _error;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_devices == null && _error == null) _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final l = await ConnScope.of(context).rpc('devices') as List;
+      if (mounted) setState(() => _devices = [for (final d in l) Map<String, dynamic>.from(d as Map)]);
+    } catch (e) {
+      if (mounted) setState(() => _error = '$e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_error != null) return ListTile(title: Text(_error!));
+    final d = _devices;
+    if (d == null) return const Padding(padding: EdgeInsets.all(16), child: LinearProgressIndicator());
+    return Column(children: [
+      for (final x in d)
+        ListTile(
+          dense: true,
+          leading: Icon(Icons.circle, size: 12, color: x['online'] == true ? Colors.greenAccent : Colors.grey),
+          title: Text('${x['name']}${x['current'] == true ? ' (this phone)' : ''}'),
+          subtitle: Text(x['online'] == true ? 'Online' : 'Offline'),
+          trailing: x['current'] == true
+              ? null
+              : IconButton(
+                  icon: const Icon(Icons.link_off),
+                  tooltip: 'Revoke',
+                  onPressed: () async {
+                    await ConnScope.of(context).rpc('devices.revoke', {'id': x['id']});
+                    _load();
+                  },
+                ),
+        ),
+      TextButton(onPressed: _load, child: const Text('Refresh')),
+    ]);
+  }
 }

@@ -4,60 +4,90 @@ A Stream Deck for your phone. A Flutter app (iOS + Android) is the button surfac
 **companion** on your PC runs the actions.
 
 ```
- phone (Flutter)  ──WebSocket over Wi-Fi──▶  companion (Node, server/)  ──▶  keyboard / apps / OBS
+ phone (Flutter)  ──WebSocket over Wi-Fi──▶  companion (Node, server/)  ──▶  keyboard / apps / OBS / Twitch / YouTube / Discord
 ```
 
 ## Quick start
 
-1. **PC companion** (Node 18+):
+1. **PC companion** (Node 18+, Windows recommended):
    ```bash
    cd server
    npm install
    npm start          # or double-click start-companion.bat
    ```
    It prints a QR code and a 6-digit PIN. Allow Node through the Windows firewall on *Private* networks.
-2. **Phone app**: `flutter run` (device on the same Wi-Fi), tap **Scan QR code**.
-   The pairing is remembered; the PIN rotates after every successful pairing.
-3. **OBS** (optional): OBS 28+ → *Tools → WebSocket Server Settings* → enable. Then enter the port/password in the app under *Settings → OBS*.
+   **After updating the project, always close and restart the companion**: an old one doesn't know the new actions
+   (the app shows a red "companion is outdated" banner when that happens). An old saved layout is backed up
+   (`~/.deckpad/config.v1.bak.json`) and replaced by the new profiles.
+2. **Phone app**: `flutter run` (same Wi-Fi). Tap **Scan QR code**, or **Find PCs on Wi-Fi** and type the PIN.
+3. **OBS**: OBS 28+ → *Tools → WebSocket Server Settings* → enable. Enter the port/password in *Settings → OBS*.
+4. **Twitch / YouTube / Discord** (optional): *Settings → Tools → Integrations* (needs your own free app registrations).
 
-## Features
+## What's in it
 
-- **Hardware-style landscape layout**: square keys centred on a dark "deck", with a screen-switcher rail on the left (portrait gets a top bar + tab strip). Orientation is a setting (landscape by default); grid presets Mini 3×2, Classic 5×3, XL 8×4, Tall 4×5 or any size up to 10×10
-- **Multiple screens** out of the box: *Stream*, *Discord*, *Desktop*, *Audio*, *Sounds*. Add, rename, reorder-by-pinning or delete screens; folders still work for sub-pages
-- **Custom icons**: pick any picture from your phone gallery, use the built-in vector icon library, or any emoji/text
-- **Dynamic icons**: every button can have an "active look" (icon / label / colour) that shows while OBS is live, recording, muted or on that scene, while a Toggle is ON, or while PC audio is muted. **Live widgets** show clock, date, CPU, RAM, PC volume, stream timer and record timer
-- **Actions**: hotkeys, type text, open app/file/URL, media keys, PC volume (set / step / mute), play sound (soundboard), system (lock, sleep, screen off, task manager, screenshot, show desktop), shell command, webhook, folder/back/home
-- **OBS**: scene, stream, record, pause record, replay buffer + save, virtual camera, studio mode + transition, mute/unmute/toggle input, set input volume, show/hide source, toggle filter, trigger OBS hotkey
-- **Macros**: ordered steps with waits, *repeat N times*, **Toggle** (ON/OFF actions with remembered state), **Cycle** (each press runs the next step). Duplicate/reorder steps
-- **Preset library** (macros like *Starting Soon*, *BRB mode*, *End Stream*, *Panic*, plus Discord, Audio, Desktop, Editing, Widgets) to start a button from
-- On-phone editor with live preview (normal/active), "Test on PC now", drag to rearrange
-- Layout is stored on the PC (`~/.deckpad/config.json`) and syncs to every paired phone; auto-reconnect, keep-screen-on, haptics
+**Deck**: hardware-style landscape layout (square keys, screen rail) or portrait; 9 ready-made screens
+(Stream, Audio, Twitch, YouTube, Discord, Desktop, Macros, Sounds, Monitor); folders; pages are yours to add/rename/delete;
+grid presets 3×2 / 5×3 / 8×4 / 4×5 or any size; drag to rearrange; long-press and double-tap actions per button.
 
-## Discord / audio notes
+**Icons**: real icons. Buttons for apps use the app's own icon extracted from your PC (Start Menu apps list → *App icon from PC*),
+websites use their favicon, everything else uses a vector icon library (no emoji by default). Emoji / gallery pictures are still available under "More".
+Default buttons for Spotify, Discord, OBS, Chrome, Explorer, Twitch, YouTube… resolve their real icons automatically at companion start.
 
-- Discord has no remote API for mute/deafen, so those buttons send hotkeys. Bind them under Discord → Settings → Keybinds
-  (defaults used: Ctrl+Shift+M mute, Ctrl+Shift+D deafen). Toggle buttons track their own state; press once to resync if you change it elsewhere.
-- Soundboard buttons need the file path of an mp3/wav on the PC. Sounds play through the PC's default output so OBS captures them via Desktop Audio.
-- PC volume buttons use the Windows default output device. Switching output devices isn't built in (use a *Shell command* with a tool such as SoundVolumeView).
+**Dynamic buttons**: an "active look" (icon/label/colour) while OBS is live/recording/muted/on that scene, a toggle is ON,
+PC audio or Discord is muted, Twitch chat mode is on. Live widgets: clock, date, CPU, RAM, GPU, network, OBS FPS, dropped frames, bitrate,
+stream/record timer, PC volume, Twitch viewers/followers, YouTube viewers.
 
-## Security
+**Actions**: hotkeys · type text · open app/file/URL · media keys · PC **and per-app** volume · play sound (soundboard) · system (lock, sleep, screen off, task manager, screenshot) ·
+shell command · webhook · OBS (scene, stream, record, pause, replay buffer, virtual cam, studio mode, mute, input volume, source/filter toggles, OBS hotkeys) ·
+Twitch (clip, marker, say, announce, chat modes, clear chat, timeout, ban, unban, shoutout, raid, ads, title, category) ·
+YouTube (say, go live, end) · Discord (real mute/deafen/leave/volume, with hotkey fallback) · switch profile · open tool screen.
 
-Only devices that paired with the PIN can send actions, and the PIN rotates after each pairing (5 wrong
-tries locks that IP for a minute). Traffic is plain WebSocket on your LAN, so use trusted Wi-Fi. Anyone
-paired can run shell commands on the PC (that is the point of the *Shell command* action): use *Forget*
-in the app or delete `tokens` from `~/.deckpad/settings.json` to revoke.
+**Macros**: sequences with waits, repeat N times, **Toggle** (remembers ON/OFF), **Cycle** (next step each press), reorder/duplicate steps, 40+ presets.
 
-## Layout
+**Tool screens**: audio **mixer** (master, each app, OBS inputs), **performance** charts, action **history**, **automations**, **integrations**, **chat & moderation**, **events**.
 
-- `lib/` – Flutter app (`connection.dart` protocol/state, `screens/`, `widgets/`)
-- `server/src/` – companion (`index.js` WebSocket server, `actions.js`, `input.js` key injection, `obs.js`)
-- `server/test/protocol.test.js` – end-to-end test (`cd server && npm test`)
+**Automations**: trigger → actions with `{{user}}`-style variables and cooldowns. Triggers: OBS stream/record/scene, Twitch follow/sub/gift/cheer/raid/redeem/chat command/online/offline,
+YouTube Super Chat/member/chat command, app in focus, time of day, CPU above, device connected.
+Automatic profile switching = a rule "app in focus → *Switch profile*" (two disabled examples are included).
+
+**Profiles & devices**: several deck layouts; each phone either *follows the PC* (so automations can switch it) or is pinned to its own profile;
+multiple phones/tablets at once, live-synced; device list with revoke.
+
+**Reliability**: auto-reconnect (phone ↔ PC and companion ↔ OBS/Twitch/Discord), layout persisted on the PC (`~/.deckpad/profiles/*.json`).
+
+## Setting up the integrations
+
+- **Twitch**: dev.twitch.tv/console → register an app, *Client Type: Public*, redirect `http://localhost` → paste the Client ID → *Log in* → enter the code on the page that opens.
+- **YouTube**: Google Cloud → enable *YouTube Data API v3* → OAuth client of type *TV and Limited Input devices* → paste Client ID + secret. The API has a daily quota; chat polling is rate-limited accordingly.
+- **Discord**: discord.com/developers → new application → add redirect `http://localhost` → paste Client ID + secret → *Connect* → click *Authorize* in the Discord window.
+  Without this, Discord buttons fall back to keyboard shortcuts (bind Ctrl+Shift+M / Ctrl+Shift+D in Discord → Keybinds).
+
+## Verification status (what has and hasn't been tested)
+
+| Area | How it was verified |
+|---|---|
+| Phone ↔ companion protocol: pairing, taps, long/double press, profiles, stats, discovery, **auto-reconnect**, edits persisted | End-to-end test: the real Node companion driven by the app's own connection code (`flutter test test/e2e_companion_test.dart`) |
+| **Vol + / Vol −**, per-app mixer, foreground-app probe, GPU/network stats, real app-icon extraction (Start Menu apps) | Run for real on a Windows 11 PC (system volume actually changed and was restored) |
+| OBS WebSocket (auth handshake, scenes, stream, mute, source toggle, events, reconnect) | **Mock OBS server** following the obs-websocket v5 spec. *Not yet run against a live OBS.* |
+| Twitch (device login, token refresh, EventSub, chat, moderation calls), YouTube (login, chat poll, Super Chat, moderation), Discord IPC | **Local mock servers** following each documented API. *Not run against the real services*: first live use may reveal differences |
+| Layout (landscape/portrait), tiles, dynamic icons, tool screens render without overflow | Flutter widget tests; Android debug APK builds |
+| iOS | Not built (needs a Mac). Permissions are in `Info.plist` |
+
+Run everything: `cd server && npm test` and, from the project root, `flutter test`.
 
 ## Notes / limits
 
-- Hotkey, typing and media keys are implemented for **Windows hosts** (via a persistent PowerShell
-  process). On macOS/Linux, open/command/webhook/OBS work but key injection returns an error.
-- iOS builds require a Mac with Xcode (`flutter build ios`); iOS permissions (camera, local network)
-  are already in `Info.plist`. The Android debug build is verified.
-- Existing layouts keep their pages. To get the new default screens, delete `~/.deckpad/config.json` (this resets your layout) and restart the companion.
-- Some games and elevated (admin) windows ignore injected keys unless the companion also runs as admin.
+- The companion is **Node, not a Flutter desktop app**: it needs OS-level control (PowerShell, Core Audio, named pipes) and a tiny dependency footprint.
+  A Flutter desktop shell/tray UI around it is possible but not built.
+- Hotkeys, typing, media keys, per-app mixer, app icons, window-focus triggers and network stats are **Windows-only**. Other features (OBS, Twitch, YouTube, webhooks, open/command) are cross-platform in principle.
+- Credentials (OBS password, Twitch/YouTube/Discord tokens) are stored in plain text in `~/.deckpad/settings.json`. Traffic between phone and PC is unencrypted WebSocket on your LAN; use trusted Wi-Fi.
+  Anyone paired can run shell commands on the PC (the *Shell command* action): revoke devices under Settings → Connected devices.
+- Games and elevated (admin) windows may ignore injected keys unless the companion runs as admin.
+- Twitch moderation by name only works with a typed login; from the chat screen it uses user IDs directly.
+- Output-device switching, Twitch/YouTube analytics, and a conditional (`if`) macro step are not implemented.
+
+## Layout of the code
+
+- `lib/` – Flutter app: `connection.dart` (protocol, state, discovery), `screens/` (deck, editor, settings, connect), `tools/` (mixer, performance, history, events, automations, integrations, chat), `widgets/`
+- `server/src/` – companion: `index.js` (server, RPC), `actions.js`, `input.js` (keys/volume/foreground), `mixer.js`, `perf.js`, `obs.js`, `twitch.js`, `youtube.js`, `discord.js`, `automations.js`, `appicons.js`, `store.js` (profiles/settings), `defaults.js` (starter screens), `discovery.js`
+- `server/test/`, `test/` – test suites described above

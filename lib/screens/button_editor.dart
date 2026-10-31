@@ -108,6 +108,81 @@ class _ButtonEditorState extends State<ButtonEditor> {
     });
   }
 
+  bool _fetchingIcon = false;
+
+  /// Pick an installed app on the PC: sets the launch target, label and the app's REAL icon.
+  Future<void> _pickApp() async {
+    final conn = ConnScope.of(context);
+    final app = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => const _AppPicker(),
+    );
+    if (app == null || !mounted) return;
+    setState(() {
+      _fetchingIcon = true;
+      b.action = {'type': 'open', 'target': app['path'] as String};
+      if (b.label.isEmpty) {
+        b.label = app['name'] as String;
+        _label.text = b.label;
+      }
+    });
+    try {
+      final png = await conn.rpc('appIcon', {'path': app['path']}) as String;
+      if (mounted) setState(() => b.image = png);
+    } catch (e) {
+      _toast('Could not read that app\'s icon: $e');
+    } finally {
+      if (mounted) setState(() => _fetchingIcon = false);
+    }
+  }
+
+  /// Fetch the favicon of the website this button opens.
+  Future<void> _siteIcon() async {
+    final target = (b.action['target'] ?? '') as String;
+    final domain = Uri.tryParse(target)?.host ?? '';
+    if (domain.isEmpty) {
+      _toast('Set the action to "Open app / link" with a web address first.');
+      return;
+    }
+    setState(() => _fetchingIcon = true);
+    try {
+      final png = await ConnScope.of(context).rpc('siteIcon', {'domain': domain}) as String;
+      if (mounted) setState(() => b.image = png);
+    } catch (e) {
+      _toast('Could not fetch the site icon: $e');
+    } finally {
+      if (mounted) setState(() => _fetchingIcon = false);
+    }
+  }
+
+  Widget _extraAction(String title, String subtitle, Json? value, ValueChanged<Json?> onChanged) {
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        initiallyExpanded: value != null,
+        title: Text(title),
+        subtitle: Text(subtitle),
+        children: [
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Enabled'),
+            value: value != null,
+            onChanged: (v) => setState(() => onChanged(v ? defaultAction('hotkey') : null)),
+          ),
+          if (value != null)
+            ActionForm(
+              key: ValueKey('$title-${value['type']}'),
+              action: value,
+              nested: true,
+              onChanged: (a) => setState(() => onChanged(a)),
+            ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _pickImage() async {
     try {
       final img = await pickIconImage();
@@ -181,7 +256,7 @@ class _ButtonEditorState extends State<ButtonEditor> {
 
   @override
   Widget build(BuildContext context) {
-    final isClientOnly = {'folder', 'back', 'home', 'widget'}.contains(b.action['type']);
+    final isClientOnly = {'folder', 'back', 'home', 'widget', 'screen'}.contains(b.action['type']);
     final preview = _previewActive == 1;
     final isWidget = b.action['type'] == 'widget';
     return Scaffold(
@@ -232,33 +307,53 @@ class _ButtonEditorState extends State<ButtonEditor> {
             Text('Icon', style: Theme.of(context).textTheme.labelLarge),
             const SizedBox(height: 8),
             Wrap(spacing: 8, runSpacing: 8, children: [
-              OutlinedButton.icon(onPressed: _pickImage, icon: const Icon(Icons.image_outlined), label: Text(b.image == null ? 'Custom picture' : 'Change picture')),
-              OutlinedButton.icon(onPressed: _pickMaterialIcon, icon: const Icon(Icons.apps), label: const Text('Icon library')),
+              FilledButton.tonalIcon(
+                onPressed: _fetchingIcon ? null : _pickApp,
+                icon: _fetchingIcon
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.apps),
+                label: const Text('App icon from PC'),
+              ),
+              OutlinedButton.icon(onPressed: _fetchingIcon ? null : _siteIcon, icon: const Icon(Icons.language), label: const Text('Website icon')),
+              OutlinedButton.icon(onPressed: _pickMaterialIcon, icon: const Icon(Icons.category_outlined), label: const Text('Icon library')),
               if (b.image != null) TextButton(onPressed: () => setState(() => b.image = null), child: const Text('Remove picture')),
             ]),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _icon,
-              decoration: const InputDecoration(labelText: 'Or any emoji / short text'),
-              onChanged: (v) => setState(() {
-                b.icon = v;
-                b.image = null;
-              }),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              children: [
-                for (final e in _emoji)
-                  InkWell(
-                    borderRadius: BorderRadius.circular(8),
-                    onTap: () => setState(() {
-                      b.icon = e;
-                      b.image = null;
-                      _icon.text = e;
-                    }),
-                    child: Padding(padding: const EdgeInsets.all(6), child: Text(e, style: const TextStyle(fontSize: 26))),
+            Theme(
+              data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+              child: ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                title: const Text('More: your own picture, emoji'),
+                children: [
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(onPressed: _pickImage, icon: const Icon(Icons.image_outlined), label: const Text('Picture from gallery')),
                   ),
-              ],
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _icon,
+                    decoration: const InputDecoration(labelText: 'Emoji / short text'),
+                    onChanged: (v) => setState(() {
+                      b.icon = v;
+                      b.image = null;
+                    }),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    children: [
+                      for (final e in _emoji)
+                        InkWell(
+                          borderRadius: BorderRadius.circular(8),
+                          onTap: () => setState(() {
+                            b.icon = e;
+                            b.image = null;
+                            _icon.text = e;
+                          }),
+                          child: Padding(padding: const EdgeInsets.all(6), child: Text(e, style: const TextStyle(fontSize: 26))),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ],
           const SizedBox(height: 12),
@@ -299,6 +394,11 @@ class _ButtonEditorState extends State<ButtonEditor> {
             currentPageId: widget.currentPageId,
             onChanged: (a) => setState(() => b.action = a),
           ),
+          if (!isClientOnly) ...[
+            const Divider(height: 32),
+            _extraAction('Long press', 'Runs instead when you hold the button', b.longAction, (a) => b.longAction = a),
+            _extraAction('Double tap', 'Runs when you tap twice quickly (adds a short delay to single taps)', b.doubleAction, (a) => b.doubleAction = a),
+          ],
           const SizedBox(height: 20),
           if (!isClientOnly)
             OutlinedButton.icon(onPressed: _test, icon: const Icon(Icons.play_arrow), label: const Text('Test on PC now')),
@@ -359,6 +459,67 @@ class _PresetSheetState extends State<_PresetSheet> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _AppPicker extends StatefulWidget {
+  const _AppPicker();
+
+  @override
+  State<_AppPicker> createState() => _AppPickerState();
+}
+
+class _AppPickerState extends State<_AppPicker> {
+  List<Json>? _apps;
+  String? _error;
+  String _q = '';
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      try {
+        final l = await ConnScope.of(context).rpc('listApps') as List;
+        if (mounted) setState(() => _apps = [for (final a in l) Map<String, dynamic>.from(a as Map)]);
+      } catch (e) {
+        if (mounted) setState(() => _error = '$e');
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final apps = (_apps ?? const <Json>[]).where((a) => (a['name'] as String).toLowerCase().contains(_q.toLowerCase())).toList();
+    return SafeArea(
+      child: SizedBox(
+        height: MediaQuery.sizeOf(context).height * 0.8,
+        child: Column(children: [
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: TextField(
+              decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Search apps installed on your PC'),
+              onChanged: (v) => setState(() => _q = v),
+            ),
+          ),
+          Expanded(
+            child: _error != null
+                ? Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(_error!, textAlign: TextAlign.center)))
+                : _apps == null
+                    ? const Center(child: CircularProgressIndicator())
+                    : apps.isEmpty
+                        ? const Center(child: Text('No apps found'))
+                        : ListView.builder(
+                            itemCount: apps.length,
+                            itemBuilder: (_, i) => ListTile(
+                              leading: const Icon(Icons.apps),
+                              title: Text(apps[i]['name'] as String),
+                              onTap: () => Navigator.pop(context, apps[i]),
+                            ),
+                          ),
+          ),
+        ]),
       ),
     );
   }

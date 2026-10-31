@@ -15,6 +15,8 @@ class _ConnectScreenState extends State<ConnectScreen> {
   final _port = TextEditingController(text: '8765');
   final _pin = TextEditingController();
   bool _seeded = false;
+  bool _searching = false;
+  List<FoundPc>? _found;
 
   @override
   void didChangeDependencies() {
@@ -24,6 +26,19 @@ class _ConnectScreenState extends State<ConnectScreen> {
     final c = ConnScope.of(context);
     _host.text = c.host;
     _port.text = c.port.toString();
+  }
+
+  Future<void> _find() async {
+    setState(() { _searching = true; _found = null; });
+    final r = await DeckConnection.discover();
+    if (!mounted) return;
+    setState(() { _searching = false; _found = r; });
+    if (r.length == 1) _pick(r.first);
+  }
+
+  void _pick(FoundPc pc) {
+    _host.text = pc.host;
+    _port.text = '${pc.port}';
   }
 
   Future<void> _scan() async {
@@ -88,7 +103,22 @@ class _ConnectScreenState extends State<ConnectScreen> {
                     icon: const Icon(Icons.qr_code_scanner),
                     label: const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Text('Scan QR code')),
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: busy || _searching ? null : _find,
+                    icon: _searching ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.wifi_find),
+                    label: Text(_searching ? 'Searching…' : 'Find PCs on Wi-Fi'),
+                  ),
+                  if (_found != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: _found!.isEmpty
+                          ? const Text('No PC found. Is the companion running on this Wi-Fi?', textAlign: TextAlign.center)
+                          : Wrap(spacing: 8, alignment: WrapAlignment.center, children: [
+                              for (final pc in _found!) ActionChip(avatar: const Icon(Icons.computer, size: 16), label: Text('${pc.name} (${pc.host})'), onPressed: () => _pick(pc)),
+                            ]),
+                    ),
+                  const SizedBox(height: 20),
                   Text('or enter manually', textAlign: TextAlign.center, style: Theme.of(context).textTheme.labelMedium),
                   const SizedBox(height: 12),
                   Row(children: [

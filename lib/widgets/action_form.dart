@@ -185,12 +185,52 @@ class _ActionFormState extends State<ActionForm> {
       case 'volume':
         final op = (a['op'] ?? 'up') as String;
         return [
+          _field('app', 'App (blank = whole PC)', hint: 'e.g. spotify, chrome, discord'),
           _dropdown('op', 'Operation', volumeOps, 'up'),
           if (op == 'set') _field('value', 'Volume (0–100)', type: TextInputType.number),
           if (op == 'up' || op == 'down') _field('value', 'Step (% per press)', type: TextInputType.number),
         ];
       case 'system':
         return [_dropdown('op', 'Operation', systemOps, 'showDesktop')];
+      case 'screen':
+        return [_dropdown('screen', 'Opens', toolScreens, 'mixer'), _note('A shortcut to a full-screen tool inside the app.')];
+      case 'profile':
+        final conn = ConnScope.of(context);
+        return [
+          _dropdown('profile', 'Switch to profile', {for (final p in conn.profiles) p['name'] as String: p['name'] as String}, conn.profiles.isEmpty ? '' : conn.profiles.first['name'] as String),
+          _note('Switches the PC-wide profile. Phones set to "Follow PC" change layout instantly.'),
+        ];
+      case 'twitch':
+        final op = (a['op'] ?? 'marker') as String;
+        return [
+          _dropdown('op', 'Twitch action', twitchOps, 'marker'),
+          if (const {'say', 'announce', 'title', 'category'}.contains(op)) _field('text', op == 'title' ? 'Title' : op == 'category' ? 'Category' : 'Message', maxLines: 2),
+          if (op == 'announce') _dropdown('color', 'Color', const {'primary': 'Primary', 'blue': 'Blue', 'green': 'Green', 'orange': 'Orange', 'purple': 'Purple'}, 'primary'),
+          if (const {'timeout', 'ban', 'unban', 'shoutout', 'raid'}.contains(op)) _field('user', 'Username', hint: 'blank = chosen at runtime is not supported; enter a login'),
+          if (op == 'timeout') _field('seconds', 'Seconds', type: TextInputType.number),
+          if (op == 'timeout' || op == 'ban') _field('reason', 'Reason (optional)'),
+          if (op == 'ad') _field('length', 'Seconds (30/60/90/120/150/180)', type: TextInputType.number),
+          if (op == 'chatMode') ...[
+            _dropdown('mode', 'Mode', const {'slow': 'Slow mode', 'subs': 'Subscribers only', 'emote': 'Emote only', 'followers': 'Followers only', 'unique': 'Unique chat'}, 'slow'),
+            _dropdown('state', 'State', const {'toggle': 'Toggle', 'on': 'Turn on', 'off': 'Turn off'}, 'toggle'),
+            if (a['mode'] == 'slow' || a['mode'] == 'followers') _field('value', a['mode'] == 'slow' ? 'Slow mode seconds' : 'Follow time (minutes, 0 = any)', type: TextInputType.number),
+          ],
+          _note('Connect Twitch under Integrations first.'),
+        ];
+      case 'youtube':
+        final op = (a['op'] ?? 'say') as String;
+        return [
+          _dropdown('op', 'YouTube action', youtubeOps, 'say'),
+          if (op == 'say') _field('text', 'Message', maxLines: 2),
+          _note('Connect YouTube under Integrations first. Go live needs a broadcast created in YouTube Studio.'),
+        ];
+      case 'discord':
+        final op = (a['op'] ?? 'toggleMute') as String;
+        return [
+          _dropdown('op', 'Discord action', discordOps, 'toggleMute'),
+          if (op == 'inputVolume' || op == 'outputVolume') _field('value', 'Volume (0–100 mic, 0–200 speakers)', type: TextInputType.number),
+          _note('Uses Discord\'s local API for real state. Without setup (Integrations → Discord) the button falls back to its keyboard shortcut if it has one.'),
+        ];
       case 'sound':
         return [
           _field('file', 'Sound file path on the PC', hint: r'C:\Sounds\airhorn.mp3'),
@@ -235,12 +275,12 @@ class _ActionFormState extends State<ActionForm> {
       case 'multi':
         return [
           _field('repeat', 'Repeat the whole sequence (times)', type: TextInputType.number),
-          _StepList(action: a, listKey: 'actions', onChanged: () => setState(() => widget.onChanged(a))),
+          StepList(action: a, listKey: 'actions', onChanged: () => setState(() => widget.onChanged(a))),
         ];
       case 'cycle':
         return [
           _note('Each press runs the next step, then loops back to the first.'),
-          _StepList(action: a, listKey: 'actions', onChanged: () => setState(() => widget.onChanged(a))),
+          StepList(action: a, listKey: 'actions', onChanged: () => setState(() => widget.onChanged(a))),
         ];
       case 'toggle':
         return [
@@ -279,11 +319,12 @@ class _ActionFormState extends State<ActionForm> {
   }
 }
 
-class _StepList extends StatelessWidget {
+/// Reorderable list of nested actions (macro / cycle steps, automation actions).
+class StepList extends StatelessWidget {
   final Json action;
   final String listKey;
   final VoidCallback onChanged;
-  const _StepList({required this.action, required this.listKey, required this.onChanged});
+  const StepList({super.key, required this.action, required this.listKey, required this.onChanged});
 
   List<Json> get steps => ((action[listKey] ??= <Json>[]) as List).cast<Json>();
 

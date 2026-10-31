@@ -88,6 +88,18 @@ async function system(op, ctx) {
 }
 
 function volume(a, ctx) {
+  if (a.app) {
+    // Per-application volume through the Windows mixer.
+    switch (a.op) {
+      case 'set': return ctx.mixer.setVolume(a.app, a.value);
+      case 'up': return ctx.mixer.changeVolume(a.app, Number(a.value) || 5);
+      case 'down': return ctx.mixer.changeVolume(a.app, -(Number(a.value) || 5));
+      case 'mute': return ctx.mixer.setMute(a.app, true);
+      case 'unmute': return ctx.mixer.setMute(a.app, false);
+      case 'toggleMute': return ctx.mixer.setMute(a.app, 'toggle');
+      default: throw new Error(`Unknown volume operation "${a.op}"`);
+    }
+  }
   switch (a.op) {
     case 'set': return ctx.input.setVolume(a.value);
     case 'up': return ctx.input.changeVolume(Number(a.value) || 5);
@@ -104,6 +116,16 @@ function volume(a, ctx) {
  * Client-only actions (folder/back) are acknowledged and ignored.
  */
 async function run(action, ctx, depth = 0) {
+  try {
+    return await runOne(action, ctx, depth);
+  } catch (e) {
+    // Optional fallback, e.g. a Discord API action that falls back to a keyboard shortcut.
+    if (action && action.fallback && typeof action.fallback === 'object') return runOne(action.fallback, ctx, depth + 1);
+    throw e;
+  }
+}
+
+async function runOne(action, ctx, depth) {
   if (!action || typeof action !== 'object') throw new Error('Button has no action');
   if (depth > MAX_DEPTH) throw new Error('Macro nested too deeply');
   switch (action.type) {
@@ -112,7 +134,16 @@ async function run(action, ctx, depth = 0) {
     case 'back':
     case 'home':
     case 'widget':
+    case 'screen':
       return;
+    case 'twitch':
+      return ctx.twitch.perform(action);
+    case 'youtube':
+      return ctx.youtube.perform(action);
+    case 'discord':
+      return ctx.discord.perform(action);
+    case 'profile':
+      return ctx.switchProfile(action.profile);
     case 'hotkey':
       return ctx.input.hotkey(action.keys);
     case 'media':

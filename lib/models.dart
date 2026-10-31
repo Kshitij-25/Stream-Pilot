@@ -20,27 +20,40 @@ class DeckButton {
   String id;
   String label;
   String icon; // emoji / short text, or "mi:<name>" for a built-in Material icon
-  String? image; // base64 PNG of a custom picture; overrides [icon]
+  String? image; // base64 PNG: a real app / website icon or custom picture; overrides [icon]
   String color;
   Json action;
+  Json? longAction; // runs on long press
+  Json? doubleAction; // runs on double tap
 
   // Appearance while the button is "active" (OBS state, toggle on, muted ...).
   String? iconOn;
   String? labelOn;
   String? colorOn;
 
+  /// Fields this app version doesn't edit (e.g. the companion's `iconHint`); kept so they survive a save.
+  Json extra;
+
+  static const _known = {
+    'id', 'label', 'icon', 'image', 'color', 'action', 'longAction', 'doubleAction', 'iconOn', 'labelOn', 'colorOn'
+  };
+
   DeckButton({
     String? id,
     this.label = '',
-    this.icon = '⭐',
+    this.icon = 'mi:star',
     this.image,
     this.color = '#37474f',
     this.iconOn,
     this.labelOn,
     this.colorOn,
+    this.longAction,
+    this.doubleAction,
     Json? action,
+    Json? extra,
   })  : id = id ?? newId(),
-        action = action ?? {'type': 'hotkey', 'keys': ''};
+        action = action ?? {'type': 'hotkey', 'keys': ''},
+        extra = extra ?? {};
 
   factory DeckButton.fromJson(Json j) => DeckButton(
         id: j['id'] as String?,
@@ -52,9 +65,13 @@ class DeckButton {
         labelOn: j['labelOn'] as String?,
         colorOn: j['colorOn'] as String?,
         action: Map<String, dynamic>.from((j['action'] ?? {'type': 'none'}) as Map),
+        longAction: j['longAction'] == null ? null : Map<String, dynamic>.from(j['longAction'] as Map),
+        doubleAction: j['doubleAction'] == null ? null : Map<String, dynamic>.from(j['doubleAction'] as Map),
+        extra: {for (final e in j.entries) if (!_known.contains(e.key)) e.key: e.value},
       );
 
   Json toJson() => {
+        ...extra,
         'id': id,
         'label': label,
         'icon': icon,
@@ -64,6 +81,8 @@ class DeckButton {
         'labelOn': ?labelOn,
         'colorOn': ?colorOn,
         'action': action,
+        'longAction': ?longAction,
+        'doubleAction': ?doubleAction,
       };
 
   DeckButton copy() => DeckButton.fromJson(jsonDecode(jsonEncode(toJson())) as Json);
@@ -220,16 +239,35 @@ class ObsState {
 class SystemStats {
   int cpu = 0;
   int mem = 0;
+  int? gpu;
+  int? netDown; // bytes/s
+  int? netUp;
+  int? obsFps;
+  int? dropped;
+  int? bitrate; // kbps
   int? vol;
   bool muted = false;
+  Json twitch = {};
+  Json youtube = {};
+  Json discord = {};
   SystemStats();
   factory SystemStats.fromJson(Json? j) {
     final s = SystemStats();
     if (j == null) return s;
-    s.cpu = (j['cpu'] as num?)?.toInt() ?? 0;
-    s.mem = (j['mem'] as num?)?.toInt() ?? 0;
-    s.vol = (j['vol'] as num?)?.toInt();
+    int? n(String k) => (j[k] as num?)?.toInt();
+    s.cpu = n('cpu') ?? 0;
+    s.mem = n('mem') ?? 0;
+    s.gpu = n('gpu');
+    s.netDown = n('netDown');
+    s.netUp = n('netUp');
+    s.obsFps = n('obsFps');
+    s.dropped = n('dropped');
+    s.bitrate = n('bitrate');
+    s.vol = n('vol');
     s.muted = j['muted'] == true;
+    s.twitch = Map<String, dynamic>.from((j['twitch'] ?? {}) as Map);
+    s.youtube = Map<String, dynamic>.from((j['youtube'] ?? {}) as Map);
+    s.discord = Map<String, dynamic>.from((j['discord'] ?? {}) as Map);
     return s;
   }
 }
@@ -266,9 +304,14 @@ const actionKinds = <ActionKind>[
   ActionKind('multi', 'Macro', 'Run several actions in order (can repeat)'),
   ActionKind('toggle', 'Toggle', 'Two states: alternates ON / OFF actions'),
   ActionKind('cycle', 'Cycle', 'Each press runs the next action in the list'),
-  ActionKind('volume', 'PC volume', 'Set, raise, lower or mute system volume'),
+  ActionKind('volume', 'PC / app volume', 'Set, raise, lower or mute system or per-app volume'),
   ActionKind('sound', 'Play sound', 'Play an audio file on the PC (soundboard)'),
   ActionKind('system', 'System', 'Lock, sleep, screenshot, task manager…'),
+  ActionKind('twitch', 'Twitch', 'Clip, marker, chat modes, moderation, ads'),
+  ActionKind('youtube', 'YouTube', 'Go live, chat, moderation'),
+  ActionKind('discord', 'Discord', 'Real mute / deafen (needs Discord setup)'),
+  ActionKind('profile', 'Switch profile', 'Change the whole deck layout'),
+  ActionKind('screen', 'Open tool screen', 'Mixer, chat, events, performance…'),
   ActionKind('widget', 'Live widget', 'Clock, CPU, RAM, volume, stream timer'),
   ActionKind('command', 'Shell command', 'Run a command on the PC'),
   ActionKind('http', 'Web request', 'Call a webhook or API'),
@@ -278,7 +321,7 @@ const actionKinds = <ActionKind>[
 ];
 
 /// Kinds that can't be used as a step inside a macro/toggle/cycle.
-const notNestable = {'multi', 'folder', 'back', 'home', 'toggle', 'cycle', 'widget'};
+const notNestable = {'multi', 'folder', 'back', 'home', 'toggle', 'cycle', 'widget', 'screen'};
 
 const widgetKinds = {
   'clock': 'Clock',
@@ -288,6 +331,60 @@ const widgetKinds = {
   'volume': 'PC volume',
   'streamTimer': 'Stream timer',
   'recordTimer': 'Recording timer',
+  'gpu': 'GPU usage',
+  'netDown': 'Network download',
+  'netUp': 'Network upload',
+  'obsFps': 'OBS FPS',
+  'dropped': 'OBS dropped frames',
+  'bitrate': 'Stream bitrate',
+  'twitchViewers': 'Twitch viewers',
+  'twitchFollowers': 'Twitch followers',
+  'ytViewers': 'YouTube viewers',
+};
+
+const toolScreens = {
+  'mixer': 'Audio mixer',
+  'perf': 'Performance',
+  'history': 'Action history',
+  'automations': 'Automations',
+  'integrations': 'Integrations',
+  'chat': 'Chat & moderation',
+  'events': 'Events',
+};
+
+const twitchOps = {
+  'marker': 'Create stream marker',
+  'clip': 'Create clip',
+  'say': 'Send chat message',
+  'announce': 'Chat announcement',
+  'chatMode': 'Toggle chat mode',
+  'clearChat': 'Clear chat',
+  'timeout': 'Timeout user',
+  'ban': 'Ban user',
+  'unban': 'Unban user',
+  'shoutout': 'Shoutout',
+  'raid': 'Start a raid',
+  'ad': 'Run ad',
+  'title': 'Set stream title',
+  'category': 'Set category',
+};
+
+const youtubeOps = {
+  'say': 'Send chat message',
+  'goLive': 'Go live (upcoming broadcast)',
+  'endStream': 'End broadcast',
+};
+
+const discordOps = {
+  'toggleMute': 'Toggle mute',
+  'mute': 'Mute',
+  'unmute': 'Unmute',
+  'toggleDeafen': 'Toggle deafen',
+  'deafen': 'Deafen',
+  'undeafen': 'Undeafen',
+  'leave': 'Leave voice channel',
+  'inputVolume': 'Set mic volume',
+  'outputVolume': 'Set speaker volume',
 };
 
 const volumeOps = {
@@ -371,6 +468,16 @@ String describeAction(Json a) {
       return systemOps[a['op']] ?? 'System';
     case 'widget':
       return 'Widget: ${widgetKinds[a['kind']] ?? a['kind']}';
+    case 'twitch':
+      return 'Twitch: ${twitchOps[a['op']] ?? a['op']}';
+    case 'youtube':
+      return 'YouTube: ${youtubeOps[a['op']] ?? a['op']}';
+    case 'discord':
+      return 'Discord: ${discordOps[a['op']] ?? a['op']}';
+    case 'profile':
+      return 'Profile ${a['profile'] ?? ''}';
+    case 'screen':
+      return 'Open ${toolScreens[a['screen']] ?? a['screen']}';
     case 'delay':
       return 'Wait ${a['ms'] ?? 0} ms';
     case 'folder':
@@ -418,6 +525,16 @@ Json defaultAction(String type) {
       return {'type': 'system', 'op': 'showDesktop'};
     case 'widget':
       return {'type': 'widget', 'kind': 'clock'};
+    case 'twitch':
+      return {'type': 'twitch', 'op': 'marker'};
+    case 'youtube':
+      return {'type': 'youtube', 'op': 'say', 'text': ''};
+    case 'discord':
+      return {'type': 'discord', 'op': 'toggleMute'};
+    case 'profile':
+      return {'type': 'profile', 'profile': ''};
+    case 'screen':
+      return {'type': 'screen', 'screen': 'mixer'};
     case 'delay':
       return {'type': 'delay', 'ms': 500};
     case 'folder':

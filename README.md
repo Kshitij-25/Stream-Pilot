@@ -22,12 +22,23 @@ A Stream Deck for your phone. A Flutter app (iOS + Android) is the button surfac
 
 ## Features
 
-- Button grid (1–8 columns × 1–10 rows), multiple pages, folders, Back/Home buttons
-- Actions: **hotkeys**, **type text**, **open app/file/URL**, **OBS** (switch scene, stream, record, mute, show/hide source, replay buffer), **media keys**, **shell command**, **webhook**, and **multi-actions** (macros with waits)
-- Live feedback: buttons light up for active scene / streaming / recording / muted; LIVE and REC badges
-- On-phone editor: label, emoji icon, colour, action form, "Test on PC", drag to rearrange, resize grid, manage pages
-- Layout is stored on the PC (`~/.deckpad/config.json`) and syncs to every paired phone
-- Auto-reconnect, keep-screen-on, haptics
+- **Hardware-style landscape layout**: square keys centred on a dark "deck", with a screen-switcher rail on the left (portrait gets a top bar + tab strip). Orientation is a setting (landscape by default); grid presets Mini 3×2, Classic 5×3, XL 8×4, Tall 4×5 or any size up to 10×10
+- **Multiple screens** out of the box: *Stream*, *Discord*, *Desktop*, *Audio*, *Sounds*. Add, rename, reorder-by-pinning or delete screens; folders still work for sub-pages
+- **Custom icons**: pick any picture from your phone gallery, use the built-in vector icon library, or any emoji/text
+- **Dynamic icons**: every button can have an "active look" (icon / label / colour) that shows while OBS is live, recording, muted or on that scene, while a Toggle is ON, or while PC audio is muted. **Live widgets** show clock, date, CPU, RAM, PC volume, stream timer and record timer
+- **Actions**: hotkeys, type text, open app/file/URL, media keys, PC volume (set / step / mute), play sound (soundboard), system (lock, sleep, screen off, task manager, screenshot, show desktop), shell command, webhook, folder/back/home
+- **OBS**: scene, stream, record, pause record, replay buffer + save, virtual camera, studio mode + transition, mute/unmute/toggle input, set input volume, show/hide source, toggle filter, trigger OBS hotkey
+- **Macros**: ordered steps with waits, *repeat N times*, **Toggle** (ON/OFF actions with remembered state), **Cycle** (each press runs the next step). Duplicate/reorder steps
+- **Preset library** (macros like *Starting Soon*, *BRB mode*, *End Stream*, *Panic*, plus Discord, Audio, Desktop, Editing, Widgets) to start a button from
+- On-phone editor with live preview (normal/active), "Test on PC now", drag to rearrange
+- Layout is stored on the PC (`~/.deckpad/config.json`) and syncs to every paired phone; auto-reconnect, keep-screen-on, haptics
+
+## Discord / audio notes
+
+- Discord has no remote API for mute/deafen, so those buttons send hotkeys. Bind them under Discord → Settings → Keybinds
+  (defaults used: Ctrl+Shift+M mute, Ctrl+Shift+D deafen). Toggle buttons track their own state; press once to resync if you change it elsewhere.
+- Soundboard buttons need the file path of an mp3/wav on the PC. Sounds play through the PC's default output so OBS captures them via Desktop Audio.
+- PC volume buttons use the Windows default output device. Switching output devices isn't built in (use a *Shell command* with a tool such as SoundVolumeView).
 
 ## Security
 
@@ -48,4 +59,5 @@ in the app or delete `tokens` from `~/.deckpad/settings.json` to revoke.
   process). On macOS/Linux, open/command/webhook/OBS work but key injection returns an error.
 - iOS builds require a Mac with Xcode (`flutter build ios`); iOS permissions (camera, local network)
   are already in `Info.plist`. The Android debug build is verified.
+- Existing layouts keep their pages. To get the new default screens, delete `~/.deckpad/config.json` (this resets your layout) and restart the companion.
 - Some games and elevated (admin) windows ignore injected keys unless the companion also runs as admin.

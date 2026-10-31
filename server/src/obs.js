@@ -17,7 +17,7 @@ class ObsClient extends EventEmitter {
     this.seq = 0;
     this.timer = null;
     this.stopped = false;
-    this.state = { connected: false, streaming: false, recording: false, scene: null, muted: {} };
+    this.state = { connected: false, streaming: false, recording: false, scene: null, muted: {}, streamStart: null, recordStart: null };
   }
 
   start() {
@@ -50,7 +50,7 @@ class ObsClient extends EventEmitter {
     this.ready = false;
     for (const { reject } of this.pending.values()) reject(new Error('OBS disconnected'));
     this.pending.clear();
-    if (this.state.connected) this._setState({ connected: false, streaming: false, recording: false });
+    if (this.state.connected) this._setState({ connected: false, streaming: false, recording: false, streamStart: null, recordStart: null });
   }
 
   _connect() {
@@ -107,10 +107,10 @@ class ObsClient extends EventEmitter {
   _onEvent({ eventType, eventData }) {
     switch (eventType) {
       case 'StreamStateChanged':
-        this._setState({ streaming: !!eventData.outputActive });
+        this._setState({ streaming: !!eventData.outputActive, streamStart: eventData.outputActive ? Date.now() : null });
         break;
       case 'RecordStateChanged':
-        this._setState({ recording: !!eventData.outputActive });
+        this._setState({ recording: !!eventData.outputActive, recordStart: eventData.outputActive ? Date.now() : null });
         break;
       case 'CurrentProgramSceneChanged':
         this._setState({ scene: eventData.sceneName });
@@ -130,6 +130,8 @@ class ObsClient extends EventEmitter {
     this._setState({
       streaming: !!stream.outputActive,
       recording: !!record.outputActive,
+      streamStart: stream.outputActive ? Date.now() - (stream.outputDuration || 0) : null,
+      recordStart: record.outputActive ? Date.now() - (record.outputDuration || 0) : null,
       scene: scene.currentProgramSceneName || scene.sceneName || null,
     });
   }
@@ -178,6 +180,26 @@ class ObsClient extends EventEmitter {
         return this.request('SetInputMute', { inputName: a.input, inputMuted: false });
       case 'saveReplay':
         return this.request('SaveReplayBuffer');
+      case 'toggleReplayBuffer':
+        return this.request('ToggleReplayBuffer');
+      case 'toggleVirtualCam':
+        return this.request('ToggleVirtualCam');
+      case 'pauseRecord':
+        return this.request('ToggleRecordPause');
+      case 'studioTransition':
+        return this.request('TriggerStudioModeTransition');
+      case 'toggleStudioMode': {
+        const { studioModeEnabled } = await this.request('GetStudioModeEnabled');
+        return this.request('SetStudioModeEnabled', { studioModeEnabled: !studioModeEnabled });
+      }
+      case 'toggleFilter': {
+        const { filterEnabled } = await this.request('GetSourceFilter', { sourceName: a.source, filterName: a.filter });
+        return this.request('SetSourceFilterEnabled', { sourceName: a.source, filterName: a.filter, filterEnabled: !filterEnabled });
+      }
+      case 'setVolume':
+        return this.request('SetInputVolume', { inputName: a.input, inputVolumeDb: Math.max(-100, Math.min(26, Number(a.db) || 0)) });
+      case 'hotkey':
+        return this.request('TriggerHotkeyByName', { hotkeyName: a.name });
       case 'toggleSource': {
         const { sceneItemId } = await this.request('GetSceneItemId', { sceneName: a.scene || this.state.scene, sourceName: a.source });
         const sceneName = a.scene || this.state.scene;

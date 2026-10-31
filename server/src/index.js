@@ -15,7 +15,32 @@ const PORT = parseInt(process.env.DECKPAD_PORT, 10) || 8765;
 const store = new Store();
 const input = createInput();
 const obs = new ObsClient(() => store.settings.obs);
-const ctx = { input, obs };
+const ctx = {
+  input,
+  obs,
+  state: { toggles: {}, cycles: {} },
+  changed: () => pushState(),
+};
+
+let stats = { cpu: 0, mem: 0, vol: null, muted: false };
+let lastCpu = os.cpus().map((c) => ({ ...c.times }));
+function sampleStats() {
+  const now = os.cpus().map((c) => ({ ...c.times }));
+  let idle = 0;
+  let total = 0;
+  now.forEach((t, i) => {
+    const p = lastCpu[i] || t;
+    total += Object.keys(t).reduce((a, k) => a + (t[k] - (p[k] || 0)), 0);
+    idle += t.idle - (p.idle || 0);
+  });
+  lastCpu = now;
+  stats = {
+    cpu: total ? Math.round((1 - idle / total) * 100) : 0,
+    mem: Math.round((1 - os.freemem() / os.totalmem()) * 100),
+    vol: input.audio ? input.audio.volume : null,
+    muted: input.audio ? input.audio.muted : false,
+  };
+}
 
 // Pairing PIN: new each launch, reusable until a device pairs successfully, then rotated.
 let pin = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
@@ -51,7 +76,7 @@ const server = http.createServer((req, res) => {
   res.end();
 });
 
-const wss = new WebSocket.Server({ server, maxPayload: 2 * 1024 * 1024 });
+const wss = new WebSocket.Server({ server, maxPayload: 32 * 1024 * 1024 });
 
 const send = (ws, msg) => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify(msg));
 const broadcast = (msg) => {
@@ -63,7 +88,17 @@ function obsPublic() {
   return { host, port, hasPassword: !!password };
 }
 
-obs.on('state', (state) => broadcast({ t: 'state', state }));
+function pushState() {
+  broadcast({ t: 'state', state: obs.state, toggles: ctx.state.toggles, now: Date.now() });
+}
+obs.on('state', pushState);
+
+setInterval(() => {
+  if (![...wss.clients].some((c) => c.authed)) return;
+  input.query();
+  sampleStats();
+  broadcast({ t: 'stats', stats, now: Date.now() });
+}, 2000).unref();
 
 wss.on('connection', (ws, req) => {
   const ip = req.socket.remoteAddress || '?';
@@ -81,6 +116,9 @@ wss.on('connection', (ws, req) => {
       token,
       config: store.config,
       state: obs.state,
+      toggles: ctx.state.toggles,
+      stats,
+      now: Date.now(),
       obs: obsPublic(),
       host: { name: os.hostname(), platform: process.platform },
     });
@@ -119,7 +157,7 @@ wss.on('connection', (ws, req) => {
         case 'press': {
           const b = store.findButton(m.id);
           if (!b) throw new Error('Button no longer exists');
-          await run(b.action, ctx);
+          await run(b.action, { ...ctx, buttonId: b.id });
           return send(ws, { t: 'result', rid: m.rid, ok: true });
         }
         case 'run': // test an unsaved action from the editor

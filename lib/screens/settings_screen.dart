@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../connection.dart';
+import '../widgets/page_dialog.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -31,21 +32,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _obsPort.dispose();
     _obsPass.dispose();
     super.dispose();
-  }
-
-  Future<String?> _prompt(String title, {String initial = ''}) {
-    final c = TextEditingController(text: initial);
-    return showDialog<String>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(title),
-        content: TextField(controller: c, autofocus: true),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, c.text.trim()), child: const Text('OK')),
-        ],
-      ),
-    );
   }
 
   Future<bool> _confirm(String title, String body) async {
@@ -87,43 +73,67 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const Divider(),
           const _Header('Layout'),
-          _stepper('Columns', cfg.cols, 1, 8, (v) => conn.updateConfig((c) => c.resize(v, c.rows))),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Wrap(spacing: 8, runSpacing: 4, children: [
+              for (final g in const [('Mini 3×2', 3, 2), ('Classic 5×3', 5, 3), ('XL 8×4', 8, 4), ('Tall 4×5', 4, 5)])
+                ChoiceChip(
+                  label: Text(g.$1),
+                  selected: cfg.cols == g.$2 && cfg.rows == g.$3,
+                  onSelected: (_) => conn.updateConfig((c) => c.resize(g.$2, g.$3)),
+                ),
+            ]),
+          ),
+          _stepper('Columns', cfg.cols, 1, 10, (v) => conn.updateConfig((c) => c.resize(v, c.rows))),
           _stepper('Rows', cfg.rows, 1, 10, (v) => conn.updateConfig((c) => c.resize(c.cols, v))),
+          ListTile(
+            title: const Text('Screen orientation'),
+            subtitle: Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: SegmentedButton<String>(
+                showSelectedIcon: false,
+                segments: const [
+                  ButtonSegment(value: 'landscape', label: Text('Landscape'), icon: Icon(Icons.stay_current_landscape)),
+                  ButtonSegment(value: 'portrait', label: Text('Portrait'), icon: Icon(Icons.stay_current_portrait)),
+                  ButtonSegment(value: 'auto', label: Text('Auto')),
+                ],
+                selected: {conn.orientation},
+                onSelectionChanged: (v) => conn.setOrientation(v.first),
+              ),
+            ),
+          ),
           const Divider(),
-          const _Header('Pages'),
+          const _Header('Screens & pages'),
           for (final p in cfg.pages.values)
             ListTile(
-              leading: Icon(p.id == cfg.rootPage ? Icons.home : Icons.folder_outlined),
+              leading: p.icon.isEmpty ? Icon(p.id == cfg.rootPage ? Icons.home : Icons.folder_outlined) : Text(p.icon, style: const TextStyle(fontSize: 22)),
               title: Text(p.name),
-              subtitle: p.id == cfg.rootPage ? const Text('Start page') : null,
+              subtitle: Text([
+                if (p.id == cfg.rootPage) 'Start screen',
+                p.pinned ? 'In switcher' : 'Folder page',
+              ].join(' · ')),
               trailing: PopupMenuButton<String>(
-                onSelected: (v) async {
-                  if (v == 'rename') {
-                    final n = await _prompt('Rename page', initial: p.name);
-                    if (n != null && n.isNotEmpty) conn.updateConfig((c) => c.pages[p.id]!.name = n);
+                onSelected: (v) {
+                  if (v == 'edit') {
+                    showPageEditor(context, conn, pageId: p.id);
                   } else if (v == 'root') {
-                    conn.updateConfig((c) => c.rootPage = p.id);
-                  } else if (v == 'delete') {
-                    if (await _confirm('Delete "${p.name}"?', 'Its buttons and any folder buttons pointing to it are removed.')) {
-                      conn.updateConfig((c) => c.deletePage(p.id));
-                    }
+                    conn.updateConfig((c) {
+                      c.rootPage = p.id;
+                      c.pages[p.id]!.pinned = true;
+                    });
                   }
                 },
                 itemBuilder: (_) => [
-                  const PopupMenuItem(value: 'rename', child: Text('Rename')),
-                  if (p.id != cfg.rootPage) const PopupMenuItem(value: 'root', child: Text('Make start page')),
-                  if (cfg.pages.length > 1) const PopupMenuItem(value: 'delete', child: Text('Delete')),
+                  const PopupMenuItem(value: 'edit', child: Text('Edit / delete')),
+                  if (p.id != cfg.rootPage) const PopupMenuItem(value: 'root', child: Text('Make start screen')),
                 ],
               ),
             ),
           ListTile(
             leading: const Icon(Icons.add),
-            title: const Text('Add page'),
-            subtitle: const Text('Reach it with a Folder button'),
-            onTap: () async {
-              final n = await _prompt('New page name');
-              if (n != null && n.isNotEmpty) conn.updateConfig((c) => c.addPage(n));
-            },
+            title: const Text('Add screen'),
+            subtitle: const Text('e.g. Streaming, Discord, Desktop, Audio'),
+            onTap: () => showPageEditor(context, conn),
           ),
           const Divider(),
           const _Header('OBS Studio'),

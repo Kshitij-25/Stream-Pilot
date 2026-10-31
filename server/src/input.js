@@ -49,10 +49,49 @@ Add-Type -TypeDefinition @"
 using System; using System.Runtime.InteropServices;
 public class K { [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra); }
 "@
+$volOk = $false
+try {
+Add-Type -TypeDefinition @"
+using System; using System.Runtime.InteropServices;
+[Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IAudioEndpointVolume {
+  int RegisterControlChangeNotify(IntPtr p); int UnregisterControlChangeNotify(IntPtr p);
+  int GetChannelCount(out uint c);
+  int SetMasterVolumeLevel(float l, ref Guid g); int SetMasterVolumeLevelScalar(float l, ref Guid g);
+  int GetMasterVolumeLevel(out float l); int GetMasterVolumeLevelScalar(out float l);
+  int SetChannelVolumeLevel(uint n, float l, ref Guid g); int SetChannelVolumeLevelScalar(uint n, float l, ref Guid g);
+  int GetChannelVolumeLevel(uint n, out float l); int GetChannelVolumeLevelScalar(uint n, out float l);
+  int SetMute([MarshalAs(UnmanagedType.Bool)] bool m, ref Guid g); int GetMute(out bool m);
+}
+[Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IMMDevice { int Activate(ref Guid id, uint ctx, IntPtr p, [MarshalAs(UnmanagedType.IUnknown)] out object o); }
+[Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IMMDeviceEnumerator { int EnumAudioEndpoints(int f, int s, out IntPtr d); int GetDefaultAudioEndpoint(int f, int r, out IMMDevice d); }
+[ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")] class MMDeviceEnumeratorComObject {}
+public class Vol {
+  static IAudioEndpointVolume Ep() {
+    var en = (IMMDeviceEnumerator)new MMDeviceEnumeratorComObject();
+    IMMDevice dev; en.GetDefaultAudioEndpoint(0, 1, out dev);
+    var iid = typeof(IAudioEndpointVolume).GUID; object o; dev.Activate(ref iid, 23, IntPtr.Zero, out o);
+    return (IAudioEndpointVolume)o;
+  }
+  public static void Set(float v) { var g = Guid.Empty; Ep().SetMasterVolumeLevelScalar(Math.Max(0f, Math.Min(1f, v)), ref g); }
+  public static void Delta(float d) { float c; var e = Ep(); e.GetMasterVolumeLevelScalar(out c); var g = Guid.Empty; e.SetMasterVolumeLevelScalar(Math.Max(0f, Math.Min(1f, c + d)), ref g); }
+  public static void Mute(bool m) { var g = Guid.Empty; Ep().SetMute(m, ref g); }
+  public static void Toggle() { bool m; var e = Ep(); e.GetMute(out m); var g = Guid.Empty; e.SetMute(!m, ref g); }
+  public static string Get() { float c; bool m; var e = Ep(); e.GetMasterVolumeLevelScalar(out c); e.GetMute(out m); return c.ToString(System.Globalization.CultureInfo.InvariantCulture) + " " + (m ? "1" : "0"); }
+}
+"@
+$volOk = $true
+} catch { }
+$out = New-Object System.IO.StreamWriter([Console]::OpenStandardOutput())
+$out.AutoFlush = $true
 while (($line = [Console]::In.ReadLine()) -ne $null) {
   try {
     $p = $line.Split(' ')
     switch ($p[0]) {
+      'V' { if ($volOk) { switch ($p[1]) { 'set' { [Vol]::Set([single]$p[2]) } 'delta' { [Vol]::Delta([single]$p[2]) } 'mute' { [Vol]::Mute($p[2] -eq '1') } 'toggle' { [Vol]::Toggle() } } } }
+      'Q' { if ($volOk) { $out.WriteLine('STAT ' + [Vol]::Get()) } }
       'D' { [K]::keybd_event([byte][int]$p[1], 0, [uint32][int]$p[2], [UIntPtr]::Zero) }
       'U' { [K]::keybd_event([byte][int]$p[1], 0, ([uint32][int]$p[2] -bor 2), [UIntPtr]::Zero) }
       'T' { [System.Windows.Forms.SendKeys]::SendWait([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($p[1]))) }
@@ -72,10 +111,40 @@ class WindowsInput {
     this.proc = spawn(
       'powershell.exe',
       ['-NoProfile', '-NoLogo', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
-      { stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true },
+      { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true },
     );
     this.proc.on('error', () => {});
     this.proc.stdin.on('error', () => {});
+    let buf = '';
+    this.proc.stdout.on('data', (d) => {
+      buf += d;
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i).trim();
+        buf = buf.slice(i + 1);
+        const m = /^STAT ([\d.eE+-]+) ([01])$/.exec(line);
+        if (m) this.audio = { volume: Math.round(parseFloat(m[1]) * 100), muted: m[2] === '1' };
+      }
+    });
+  }
+
+  /** Last known system audio state (refreshed by query()). */
+  audio = null;
+
+  query() {
+    this._send(['Q']);
+  }
+
+  setVolume(percent) {
+    this._send([`V set ${Math.max(0, Math.min(100, Number(percent) || 0)) / 100}`]);
+  }
+
+  changeVolume(percentDelta) {
+    this._send([`V delta ${(Number(percentDelta) || 0) / 100}`]);
+  }
+
+  setMute(mode) {
+    this._send([mode === 'toggle' ? 'V toggle' : `V mute ${mode ? 1 : 0}`]);
   }
 
   _send(lines) {
@@ -107,6 +176,17 @@ class WindowsInput {
 }
 
 class UnsupportedInput {
+  audio = null;
+  query() {}
+  setVolume() {
+    return this.hotkey();
+  }
+  changeVolume() {
+    return this.hotkey();
+  }
+  setMute() {
+    return this.hotkey();
+  }
   hotkey() {
     throw new Error(`Hotkeys are only implemented for Windows hosts (this is ${process.platform}).`);
   }

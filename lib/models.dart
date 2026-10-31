@@ -19,15 +19,25 @@ String newId() => 'c${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}';
 class DeckButton {
   String id;
   String label;
-  String icon;
+  String icon; // emoji / short text, or "mi:<name>" for a built-in Material icon
+  String? image; // base64 PNG of a custom picture; overrides [icon]
   String color;
   Json action;
+
+  // Appearance while the button is "active" (OBS state, toggle on, muted ...).
+  String? iconOn;
+  String? labelOn;
+  String? colorOn;
 
   DeckButton({
     String? id,
     this.label = '',
     this.icon = '⭐',
+    this.image,
     this.color = '#37474f',
+    this.iconOn,
+    this.labelOn,
+    this.colorOn,
     Json? action,
   })  : id = id ?? newId(),
         action = action ?? {'type': 'hotkey', 'keys': ''};
@@ -36,20 +46,38 @@ class DeckButton {
         id: j['id'] as String?,
         label: (j['label'] ?? '') as String,
         icon: (j['icon'] ?? '') as String,
+        image: j['image'] as String?,
         color: (j['color'] ?? '#37474f') as String,
+        iconOn: j['iconOn'] as String?,
+        labelOn: j['labelOn'] as String?,
+        colorOn: j['colorOn'] as String?,
         action: Map<String, dynamic>.from((j['action'] ?? {'type': 'none'}) as Map),
       );
 
-  Json toJson() => {'id': id, 'label': label, 'icon': icon, 'color': color, 'action': action};
+  Json toJson() => {
+        'id': id,
+        'label': label,
+        'icon': icon,
+        'image': ?image,
+        'color': color,
+        'iconOn': ?iconOn,
+        'labelOn': ?labelOn,
+        'colorOn': ?colorOn,
+        'action': action,
+      };
 
   DeckButton copy() => DeckButton.fromJson(jsonDecode(jsonEncode(toJson())) as Json);
+
+  bool get hasActiveLook => (iconOn ?? '').isNotEmpty || (labelOn ?? '').isNotEmpty || (colorOn ?? '').isNotEmpty;
 }
 
 class DeckPage {
   String id;
   String name;
+  String icon;
+  bool pinned; // shown in the screen switcher (rail / tab bar)
   List<DeckButton?> buttons;
-  DeckPage(this.id, this.name, this.buttons);
+  DeckPage(this.id, this.name, this.buttons, {this.icon = '', this.pinned = false});
 
   factory DeckPage.fromJson(Json j, int slots) {
     final list = <DeckButton?>[];
@@ -59,10 +87,22 @@ class DeckPage {
     while (list.length < slots) {
       list.add(null);
     }
-    return DeckPage(j['id'] as String, (j['name'] ?? j['id']) as String, list.sublist(0, slots));
+    return DeckPage(
+      j['id'] as String,
+      (j['name'] ?? j['id']) as String,
+      list.sublist(0, slots),
+      icon: (j['icon'] ?? '') as String,
+      pinned: j['pinned'] == true,
+    );
   }
 
-  Json toJson() => {'id': id, 'name': name, 'buttons': buttons.map((b) => b?.toJson()).toList()};
+  Json toJson() => {
+        'id': id,
+        'name': name,
+        'icon': icon,
+        'pinned': pinned,
+        'buttons': buttons.map((b) => b?.toJson()).toList(),
+      };
 }
 
 class DeckConfig {
@@ -127,10 +167,16 @@ class DeckConfig {
     rows = newRows;
   }
 
-  String addPage(String name) {
+  String addPage(String name, {String icon = '', bool pinned = false}) {
     final id = 'p${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}';
-    pages[id] = DeckPage(id, name, List<DeckButton?>.filled(cols * rows, null));
+    pages[id] = DeckPage(id, name, List<DeckButton?>.filled(cols * rows, null), icon: icon, pinned: pinned);
     return id;
+  }
+
+  /// Pages shown in the screen switcher; always at least the start page.
+  List<DeckPage> get screens {
+    final list = pages.values.where((p) => p.pinned).toList();
+    return list.isEmpty ? [pages[rootPage] ?? pages.values.first] : list;
   }
 
   void deletePage(String id) {
@@ -153,6 +199,8 @@ class ObsState {
   bool recording = false;
   String? scene;
   Map<String, bool> muted = {};
+  int? streamStart; // server epoch ms
+  int? recordStart;
 
   ObsState();
   factory ObsState.fromJson(Json? j) {
@@ -162,7 +210,26 @@ class ObsState {
     s.streaming = j['streaming'] == true;
     s.recording = j['recording'] == true;
     s.scene = j['scene'] as String?;
+    s.streamStart = (j['streamStart'] as num?)?.toInt();
+    s.recordStart = (j['recordStart'] as num?)?.toInt();
     s.muted = {for (final e in ((j['muted'] ?? {}) as Map).entries) e.key as String: e.value == true};
+    return s;
+  }
+}
+
+class SystemStats {
+  int cpu = 0;
+  int mem = 0;
+  int? vol;
+  bool muted = false;
+  SystemStats();
+  factory SystemStats.fromJson(Json? j) {
+    final s = SystemStats();
+    if (j == null) return s;
+    s.cpu = (j['cpu'] as num?)?.toInt() ?? 0;
+    s.mem = (j['mem'] as num?)?.toInt() ?? 0;
+    s.vol = (j['vol'] as num?)?.toInt();
+    s.muted = j['muted'] == true;
     return s;
   }
 }
@@ -196,13 +263,51 @@ const actionKinds = <ActionKind>[
   ActionKind('open', 'Open app / link', 'Launch a program, file or URL'),
   ActionKind('obs', 'OBS', 'Scenes, stream, record, mute'),
   ActionKind('media', 'Media key', 'Play/pause, volume, next track'),
-  ActionKind('multi', 'Multi-action', 'Run several actions in order'),
+  ActionKind('multi', 'Macro', 'Run several actions in order (can repeat)'),
+  ActionKind('toggle', 'Toggle', 'Two states: alternates ON / OFF actions'),
+  ActionKind('cycle', 'Cycle', 'Each press runs the next action in the list'),
+  ActionKind('volume', 'PC volume', 'Set, raise, lower or mute system volume'),
+  ActionKind('sound', 'Play sound', 'Play an audio file on the PC (soundboard)'),
+  ActionKind('system', 'System', 'Lock, sleep, screenshot, task manager…'),
+  ActionKind('widget', 'Live widget', 'Clock, CPU, RAM, volume, stream timer'),
   ActionKind('command', 'Shell command', 'Run a command on the PC'),
   ActionKind('http', 'Web request', 'Call a webhook or API'),
   ActionKind('folder', 'Folder', 'Open another page of buttons'),
   ActionKind('back', 'Back', 'Return to the previous page'),
   ActionKind('home', 'Home', 'Jump to the first page'),
 ];
+
+/// Kinds that can't be used as a step inside a macro/toggle/cycle.
+const notNestable = {'multi', 'folder', 'back', 'home', 'toggle', 'cycle', 'widget'};
+
+const widgetKinds = {
+  'clock': 'Clock',
+  'date': 'Date',
+  'cpu': 'CPU usage',
+  'ram': 'RAM usage',
+  'volume': 'PC volume',
+  'streamTimer': 'Stream timer',
+  'recordTimer': 'Recording timer',
+};
+
+const volumeOps = {
+  'up': 'Volume up',
+  'down': 'Volume down',
+  'set': 'Set volume to…',
+  'toggleMute': 'Toggle mute',
+  'mute': 'Mute',
+  'unmute': 'Unmute',
+};
+
+const systemOps = {
+  'showDesktop': 'Show desktop',
+  'screenshot': 'Screenshot (snip)',
+  'taskManager': 'Task manager',
+  'lock': 'Lock PC',
+  'sleep': 'Sleep',
+  'monitorOff': 'Turn screen off',
+  'emptyRecycleBin': 'Empty recycle bin',
+};
 
 const mediaKeys = {
   'playpause': 'Play / Pause',
@@ -224,7 +329,15 @@ const obsOps = {
   'mute': 'Mute input',
   'unmute': 'Unmute input',
   'toggleSource': 'Show / hide source',
+  'toggleFilter': 'Toggle source filter',
+  'setVolume': 'Set input volume (dB)',
   'saveReplay': 'Save replay buffer',
+  'toggleReplayBuffer': 'Start / stop replay buffer',
+  'toggleVirtualCam': 'Toggle virtual camera',
+  'pauseRecord': 'Pause / resume recording',
+  'toggleStudioMode': 'Toggle studio mode',
+  'studioTransition': 'Studio-mode transition',
+  'hotkey': 'Trigger OBS hotkey by name',
 };
 
 String describeAction(Json a) {
@@ -244,7 +357,20 @@ String describeAction(Json a) {
     case 'obs':
       return 'OBS: ${obsOps[a['op']] ?? a['op']}${a['scene'] != null && a['op'] == 'scene' ? ' → ${a['scene']}' : ''}';
     case 'multi':
-      return 'Macro (${(a['actions'] as List?)?.length ?? 0} steps)';
+      final r = int.tryParse('${a['repeat'] ?? 1}') ?? 1;
+      return 'Macro (${(a['actions'] as List?)?.length ?? 0} steps${r > 1 ? ' ×$r' : ''})';
+    case 'toggle':
+      return 'Toggle: ${describeAction(Map<String, dynamic>.from((a['on'] ?? {'type': 'none'}) as Map))}';
+    case 'cycle':
+      return 'Cycle (${(a['actions'] as List?)?.length ?? 0} steps)';
+    case 'volume':
+      return '${volumeOps[a['op']] ?? 'Volume'}${a['op'] == 'set' || a['op'] == 'up' || a['op'] == 'down' ? ' ${a['value'] ?? ''}' : ''}';
+    case 'sound':
+      return 'Play ${a['file'] ?? ''}';
+    case 'system':
+      return systemOps[a['op']] ?? 'System';
+    case 'widget':
+      return 'Widget: ${widgetKinds[a['kind']] ?? a['kind']}';
     case 'delay':
       return 'Wait ${a['ms'] ?? 0} ms';
     case 'folder':
@@ -275,7 +401,23 @@ Json defaultAction(String type) {
     case 'obs':
       return {'type': 'obs', 'op': 'toggleStream'};
     case 'multi':
-      return {'type': 'multi', 'actions': <Json>[]};
+      return {'type': 'multi', 'repeat': 1, 'actions': <Json>[]};
+    case 'toggle':
+      return {
+        'type': 'toggle',
+        'on': {'type': 'hotkey', 'keys': ''},
+        'off': {'type': 'hotkey', 'keys': ''},
+      };
+    case 'cycle':
+      return {'type': 'cycle', 'actions': <Json>[]};
+    case 'volume':
+      return {'type': 'volume', 'op': 'up', 'value': 5};
+    case 'sound':
+      return {'type': 'sound', 'file': ''};
+    case 'system':
+      return {'type': 'system', 'op': 'showDesktop'};
+    case 'widget':
+      return {'type': 'widget', 'kind': 'clock'};
     case 'delay':
       return {'type': 'delay', 'ms': 500};
     case 'folder':

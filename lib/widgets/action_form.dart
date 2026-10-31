@@ -4,7 +4,7 @@ import '../connection.dart';
 import '../models.dart';
 
 /// Edits one action map in place and reports every change through [onChanged].
-/// With [nested] true it hides the actions that make no sense inside a macro (folders, nested macros).
+/// With [nested] true it hides the actions that make no sense inside a macro (folders, nested macros...).
 class ActionForm extends StatefulWidget {
   final Json action;
   final ValueChanged<Json> onChanged;
@@ -52,7 +52,27 @@ class _ActionFormState extends State<ActionForm> {
         keyboardType: type,
         autocorrect: false,
         decoration: InputDecoration(labelText: label, hintText: hint, suffixIcon: suffix),
-        onChanged: (v) => key == 'ms' ? _set(key, int.tryParse(v) ?? 0) : _set(key, v),
+        onChanged: (v) {
+          if (type == TextInputType.number || type == const TextInputType.numberWithOptions(decimal: true, signed: true)) {
+            _set(key, num.tryParse(v) ?? 0);
+          } else {
+            _set(key, v);
+          }
+        },
+      ),
+    );
+  }
+
+  Widget _dropdown(String key, String label, Map<String, String> items, String fallback) {
+    final cur = widget.action[key];
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: DropdownButtonFormField<String>(
+        initialValue: items.containsKey(cur) ? cur as String : fallback,
+        decoration: InputDecoration(labelText: label),
+        isExpanded: true,
+        items: [for (final e in items.entries) DropdownMenuItem(value: e.key, child: Text(e.value, overflow: TextOverflow.ellipsis))],
+        onChanged: (v) => setState(() => _set(key, v)),
       ),
     );
   }
@@ -100,7 +120,7 @@ class _ActionFormState extends State<ActionForm> {
     }
     _lastType = type;
 
-    final kinds = actionKinds.where((k) => !widget.nested || !{'multi', 'folder', 'back', 'home'}.contains(k.type)).toList();
+    final kinds = actionKinds.where((k) => !widget.nested || !notNestable.contains(k.type)).toList();
     final typeItems = [
       for (final k in kinds) DropdownMenuItem(value: k.type, child: Text(k.label)),
       if (widget.nested) const DropdownMenuItem(value: 'delay', child: Text('Wait')),
@@ -123,18 +143,17 @@ class _ActionFormState extends State<ActionForm> {
     );
   }
 
+  Widget _note(String text) => Padding(
+        padding: const EdgeInsets.only(top: 6),
+        child: Text(text, style: const TextStyle(fontSize: 12, color: Colors.white60)),
+      );
+
   List<Widget> _fields(String type, Json a) {
     switch (type) {
       case 'hotkey':
         return [
           _field('keys', 'Keys', hint: 'ctrl+shift+m'),
-          const Padding(
-            padding: EdgeInsets.only(top: 6),
-            child: Text(
-              'Join keys with +. Names: ctrl, shift, alt, win, enter, esc, tab, space, f1–f24, up/down/left/right, a–z, 0–9.',
-              style: TextStyle(fontSize: 12, color: Colors.white60),
-            ),
-          ),
+          _note('Join keys with +. Names: ctrl, shift, alt, win, enter, esc, tab, space, f1–f24, up/down/left/right, a–z, 0–9.'),
         ];
       case 'text':
         return [
@@ -155,58 +174,44 @@ class _ActionFormState extends State<ActionForm> {
         return [_field('command', 'Command', hint: 'e.g. shutdown /s /t 60', maxLines: 2)];
       case 'http':
         return [
-          Padding(
-            padding: const EdgeInsets.only(top: 12),
-            child: DropdownButtonFormField<String>(
-              initialValue: (a['method'] ?? 'GET') as String,
-              decoration: const InputDecoration(labelText: 'Method'),
-              items: const [
-                DropdownMenuItem(value: 'GET', child: Text('GET')),
-                DropdownMenuItem(value: 'POST', child: Text('POST')),
-                DropdownMenuItem(value: 'PUT', child: Text('PUT')),
-              ],
-              onChanged: (v) => setState(() => _set('method', v)),
-            ),
-          ),
+          _dropdown('method', 'Method', const {'GET': 'GET', 'POST': 'POST', 'PUT': 'PUT'}, 'GET'),
           _field('url', 'URL', type: TextInputType.url),
-          if (a['method'] != 'GET') _field('body', 'JSON body (optional)', maxLines: 3),
+          if (a['method'] != null && a['method'] != 'GET') _field('body', 'JSON body (optional)', maxLines: 3),
         ];
       case 'delay':
         return [_field('ms', 'Milliseconds', type: TextInputType.number)];
       case 'media':
+        return [_dropdown('key', 'Key', mediaKeys, 'playpause')];
+      case 'volume':
+        final op = (a['op'] ?? 'up') as String;
         return [
-          Padding(
-            padding: const EdgeInsets.only(top: 12),
-            child: DropdownButtonFormField<String>(
-              initialValue: mediaKeys.containsKey(a['key']) ? a['key'] as String : 'playpause',
-              decoration: const InputDecoration(labelText: 'Key'),
-              items: [for (final e in mediaKeys.entries) DropdownMenuItem(value: e.key, child: Text(e.value))],
-              onChanged: (v) => setState(() => _set('key', v)),
-            ),
-          ),
+          _dropdown('op', 'Operation', volumeOps, 'up'),
+          if (op == 'set') _field('value', 'Volume (0–100)', type: TextInputType.number),
+          if (op == 'up' || op == 'down') _field('value', 'Step (% per press)', type: TextInputType.number),
         ];
+      case 'system':
+        return [_dropdown('op', 'Operation', systemOps, 'showDesktop')];
+      case 'sound':
+        return [
+          _field('file', 'Sound file path on the PC', hint: r'C:\Sounds\airhorn.mp3'),
+          _note('Supports mp3 / wav / wma. Plays through the PC\'s default output, so OBS picks it up from Desktop Audio.'),
+        ];
+      case 'widget':
+        return [_dropdown('kind', 'Shows', widgetKinds, 'clock'), _note('A live display. Pressing it does nothing.')];
       case 'obs':
         final op = (a['op'] ?? 'toggleStream') as String;
         return [
-          Padding(
-            padding: const EdgeInsets.only(top: 12),
-            child: DropdownButtonFormField<String>(
-              initialValue: obsOps.containsKey(op) ? op : 'toggleStream',
-              decoration: const InputDecoration(labelText: 'OBS operation'),
-              items: [for (final e in obsOps.entries) DropdownMenuItem(value: e.key, child: Text(e.value))],
-              onChanged: (v) => setState(() => _set('op', v)),
-            ),
-          ),
+          _dropdown('op', 'OBS operation', obsOps, 'toggleStream'),
           if (op == 'scene') _obsPicker('scene', 'scenes', 'Scene name'),
           if (op == 'toggleMute' || op == 'mute' || op == 'unmute') _obsPicker('input', 'inputs', 'Audio input name'),
+          if (op == 'setVolume') ...[_obsPicker('input', 'inputs', 'Audio input name'), _field('db', 'Volume in dB (-100 to 26)', type: const TextInputType.numberWithOptions(decimal: true, signed: true))],
           if (op == 'toggleSource') ...[
             _obsPicker('scene', 'scenes', 'Scene (blank = current)'),
             _field('source', 'Source name'),
           ],
-          const Padding(
-            padding: EdgeInsets.only(top: 6),
-            child: Text('Needs OBS 28+ with WebSocket server enabled (see Settings → OBS).', style: TextStyle(fontSize: 12, color: Colors.white60)),
-          ),
+          if (op == 'toggleFilter') ...[_field('source', 'Source name'), _field('filter', 'Filter name')],
+          if (op == 'hotkey') _field('name', 'OBS hotkey name', hint: 'ReplayBuffer.Save'),
+          _note('Needs OBS 28+ with the WebSocket server enabled (Settings → OBS).'),
         ];
       case 'folder':
         final conn = ConnScope.of(context);
@@ -228,22 +233,59 @@ class _ActionFormState extends State<ActionForm> {
           if (cur == '__new__') _field('newName', 'New page name'),
         ];
       case 'multi':
-        return [_MacroSteps(action: a, onChanged: () => setState(() => widget.onChanged(a)))];
+        return [
+          _field('repeat', 'Repeat the whole sequence (times)', type: TextInputType.number),
+          _StepList(action: a, listKey: 'actions', onChanged: () => setState(() => widget.onChanged(a))),
+        ];
+      case 'cycle':
+        return [
+          _note('Each press runs the next step, then loops back to the first.'),
+          _StepList(action: a, listKey: 'actions', onChanged: () => setState(() => widget.onChanged(a))),
+        ];
+      case 'toggle':
+        return [
+          const SizedBox(height: 16),
+          Text('When switching ON', style: Theme.of(context).textTheme.titleSmall),
+          _nestedForm('on', a),
+          const SizedBox(height: 16),
+          Text('When switching OFF', style: Theme.of(context).textTheme.titleSmall),
+          _nestedForm('off', a),
+          _note('The button shows its "active look" while ON. State resets if the companion restarts.'),
+        ];
       case 'back':
         return [const Padding(padding: EdgeInsets.only(top: 12), child: Text('Returns to the previous page.'))];
       case 'home':
-        return [const Padding(padding: EdgeInsets.only(top: 12), child: Text('Jumps to the first page.'))];
+        return [const Padding(padding: EdgeInsets.only(top: 12), child: Text('Jumps to the start screen.'))];
     }
     return const [];
   }
+
+  Widget _nestedForm(String key, Json a) {
+    final sub = Map<String, dynamic>.from((a[key] ?? defaultAction('hotkey')) as Map);
+    a[key] = sub;
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: ActionForm(
+        key: ValueKey('$key-${sub['type']}'),
+        action: sub,
+        nested: true,
+        onChanged: (updated) {
+          a[key] = updated;
+          widget.onChanged(a);
+          setState(() {});
+        },
+      ),
+    );
+  }
 }
 
-class _MacroSteps extends StatelessWidget {
+class _StepList extends StatelessWidget {
   final Json action;
+  final String listKey;
   final VoidCallback onChanged;
-  const _MacroSteps({required this.action, required this.onChanged});
+  const _StepList({required this.action, required this.listKey, required this.onChanged});
 
-  List<Json> get steps => (action['actions'] as List).cast<Json>();
+  List<Json> get steps => ((action[listKey] ??= <Json>[]) as List).cast<Json>();
 
   @override
   Widget build(BuildContext context) {
@@ -279,6 +321,7 @@ class _MacroSteps extends StatelessWidget {
                       icon: const Icon(Icons.arrow_downward),
                       onPressed: i == list.length - 1 ? null : () { list.insert(i + 1, list.removeAt(i)); onChanged(); },
                     ),
+                    IconButton(icon: const Icon(Icons.copy), tooltip: 'Duplicate', onPressed: () { list.insert(i + 1, Map<String, dynamic>.from(list[i])); onChanged(); }),
                     IconButton(icon: const Icon(Icons.delete_outline), onPressed: () { list.removeAt(i); onChanged(); }),
                   ],
                 ),
@@ -291,9 +334,10 @@ class _MacroSteps extends StatelessWidget {
           onPressed: () async {
             final t = await showModalBottomSheet<String>(
               context: context,
+              isScrollControlled: true,
               builder: (_) => SafeArea(
-                child: ListView(children: [
-                  for (final k in actionKinds.where((k) => !{'multi', 'folder', 'back', 'home'}.contains(k.type)))
+                child: ListView(shrinkWrap: true, children: [
+                  for (final k in actionKinds.where((k) => !notNestable.contains(k.type)))
                     ListTile(title: Text(k.label), subtitle: Text(k.hint), onTap: () => Navigator.pop(context, k.type)),
                   ListTile(title: const Text('Wait'), subtitle: const Text('Pause before the next step'), onTap: () => Navigator.pop(context, 'delay')),
                 ]),

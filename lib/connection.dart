@@ -24,6 +24,12 @@ class DeckConnection extends ChangeNotifier {
   DeckConfig? config;
   ObsState obs = ObsState();
   ObsSettings obsSettings = ObsSettings();
+  SystemStats stats = SystemStats();
+  Map<String, bool> toggles = {};
+  int _clockOffset = 0; // server ms minus phone ms
+
+  /// 'landscape' | 'portrait' | 'auto'
+  String orientation = 'landscape';
 
   bool haptics = true;
   bool keepAwake = true;
@@ -52,6 +58,7 @@ class DeckConnection extends ChangeNotifier {
     port = _prefs.getInt('port') ?? 8765;
     token = _prefs.getString('token');
     haptics = _prefs.getBool('haptics') ?? true;
+    orientation = _prefs.getString('orientation') ?? 'landscape';
     keepAwake = _prefs.getBool('keepAwake') ?? true;
     final cached = _prefs.getString('config');
     if (cached != null) {
@@ -68,6 +75,45 @@ class DeckConnection extends ChangeNotifier {
     haptics = v;
     _prefs.setBool('haptics', v);
     notifyListeners();
+  }
+
+  void setOrientation(String v) {
+    orientation = v;
+    _prefs.setString('orientation', v);
+    notifyListeners();
+  }
+
+  /// Current time on the PC (for stream timers that must not drift with phone clock).
+  int get serverNow => DateTime.now().millisecondsSinceEpoch + _clockOffset;
+
+  void _syncClock(dynamic now) {
+    if (now is num) _clockOffset = now.toInt() - DateTime.now().millisecondsSinceEpoch;
+  }
+
+  /// Whether a button should currently show its "active" look.
+  bool isActive(DeckButton b) {
+    final a = b.action;
+    if (toggles[b.id] == true) return true;
+    switch (a['type']) {
+      case 'obs':
+        if (!obs.connected) return false;
+        switch (a['op']) {
+          case 'toggleStream':
+          case 'startStream':
+            return obs.streaming;
+          case 'toggleRecord':
+            return obs.recording;
+          case 'scene':
+            return obs.scene != null && obs.scene == a['scene'];
+          case 'toggleMute':
+          case 'mute':
+            return obs.muted[a['input']] == true;
+        }
+        return false;
+      case 'volume':
+        return (a['op'] == 'toggleMute' || a['op'] == 'mute') && stats.muted;
+    }
+    return false;
   }
 
   void setKeepAwake(bool v) {
@@ -192,7 +238,10 @@ class DeckConnection extends ChangeNotifier {
         error = null;
         hostName = (m['host']?['name'] ?? host) as String;
         _setConfig(m['config'] as Json);
+        _syncClock(m['now']);
         obs = ObsState.fromJson(m['state'] as Json?);
+        toggles = _toggles(m['toggles']);
+        stats = SystemStats.fromJson(m['stats'] as Json?);
         obsSettings = ObsSettings.fromJson(m['obs'] as Json?);
         status = LinkStatus.connected;
         _applyWakelock();
@@ -217,7 +266,14 @@ class DeckConnection extends ChangeNotifier {
         notifyListeners();
         break;
       case 'state':
+        _syncClock(m['now']);
         obs = ObsState.fromJson(m['state'] as Json?);
+        toggles = _toggles(m['toggles']);
+        notifyListeners();
+        break;
+      case 'stats':
+        _syncClock(m['now']);
+        stats = SystemStats.fromJson(m['stats'] as Json?);
         notifyListeners();
         break;
       case 'obsSettings':
@@ -243,6 +299,9 @@ class DeckConnection extends ChangeNotifier {
         break;
     }
   }
+
+  Map<String, bool> _toggles(dynamic j) =>
+      {for (final e in ((j ?? {}) as Map).entries) e.key as String: e.value == true};
 
   void _setConfig(Json j) {
     config = DeckConfig.fromJson(j);

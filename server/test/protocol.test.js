@@ -55,7 +55,7 @@ function client() {
   c.sendj({ t: 'hello', pin, name: 'test phone' });
   m = await c.next();
   assert.strictEqual(m.t, 'welcome'); assert.ok(m.token);
-  assert.ok(m.config.pages.home.buttons[0]);
+  assert.ok(m.config.pages.streaming.buttons[0]);
   const token = m.token;
   console.log('ok pairing');
 
@@ -72,12 +72,12 @@ function client() {
 
   // edit config: add a command button, broadcast to other client
   const cfg = m.config;
-  cfg.pages.home.buttons[15] = { id: 'testbtn', label: 'T', icon: 'x', color: '#000', action: { type: 'command', command: 'echo hi' } };
-  cfg.pages.home.buttons[14] = { id: 'bad', label: 'B', icon: 'x', color: '#000', action: { type: 'command', command: 'exit 3' } };
-  cfg.pages.home.buttons[13] = { id: 'macro', label: 'M', icon: 'x', color: '#000', action: { type: 'multi', actions: [{ type: 'delay', ms: 50 }, { type: 'command', command: 'echo a' }] } };
+  cfg.pages.streaming.buttons[10] = { id: 'testbtn', label: 'T', icon: 'x', color: '#000', action: { type: 'command', command: 'echo hi' } };
+  cfg.pages.streaming.buttons[9] = { id: 'bad', label: 'B', icon: 'x', color: '#000', action: { type: 'command', command: 'exit 3' } };
+  cfg.pages.streaming.buttons[8] = { id: 'macro', label: 'M', icon: 'x', color: '#000', action: { type: 'multi', actions: [{ type: 'delay', ms: 50 }, { type: 'command', command: 'echo a' }] } };
   c.sendj({ t: 'saveConfig', config: cfg });
   m = await c3.next((x) => x.t === 'config');
-  assert.strictEqual(m.config.pages.home.buttons[15].id, 'testbtn');
+  assert.strictEqual(m.config.pages.streaming.buttons[10].id, 'testbtn');
   console.log('ok config broadcast');
 
   c3.sendj({ t: 'press', id: 'testbtn', rid: 1 });
@@ -99,9 +99,45 @@ function client() {
   m = await c3.next((x) => x.t === 'result' && x.rid === 8); assert.ok(!m.ok && /OBS/.test(m.error));
   console.log('ok actions');
 
+  // toggle + cycle state
+  const cfg2 = JSON.parse(JSON.stringify(cfg));
+  const cmd = (c) => ({ type: 'command', command: c });
+  cfg2.pages.streaming.buttons[12] = { id: 'tog', label: 'T', icon: 'x', color: '#000', action: { type: 'toggle', on: cmd('echo on'), off: cmd('echo off') } };
+  cfg2.pages.streaming.buttons[11] = { id: 'cyc', label: 'C', icon: 'x', color: '#000', action: { type: 'cycle', actions: [cmd('echo 1'), cmd('exit 9')] } };
+  c3.sendj({ t: 'saveConfig', config: cfg2 });
+  await c3.next((x) => x.t === 'config');
+  c3.sendj({ t: 'press', id: 'tog', rid: 20 });
+  m = await c3.next((x) => x.t === 'state'); assert.strictEqual(m.toggles.tog, true);
+  await c3.next((x) => x.t === 'result');
+  c3.sendj({ t: 'press', id: 'tog', rid: 21 });
+  m = await c3.next((x) => x.t === 'state'); assert.strictEqual(m.toggles.tog, false);
+  await c3.next((x) => x.t === 'result');
+  c3.sendj({ t: 'press', id: 'cyc', rid: 22 });
+  m = await c3.next((x) => x.t === 'result' && x.rid === 22); assert.ok(m.ok);
+  c3.sendj({ t: 'press', id: 'cyc', rid: 23 });
+  m = await c3.next((x) => x.t === 'result' && x.rid === 23); assert.ok(!m.ok); // second step fails
+  c3.sendj({ t: 'run', rid: 24, action: { type: 'multi', repeat: 3, actions: [cmd('echo r')] } });
+  m = await c3.next((x) => x.t === 'result' && x.rid === 24); assert.ok(m.ok);
+  console.log('ok toggle/cycle/repeat');
+
+  // live stats (and, on Windows, system volume readback)
+  m = await c3.next((x) => x.t === 'stats');
+  assert.ok(m.stats.cpu >= 0 && m.stats.mem > 0);
+  if (process.platform === 'win32') {
+    let vol = null;
+    for (let i = 0; i < 4 && vol === null; i++) {
+      m = await c3.next((x) => x.t === 'stats');
+      vol = m.stats.vol;
+    }
+    assert.ok(vol !== null && vol >= 0 && vol <= 100, 'volume readback ' + vol);
+    c3.sendj({ t: 'run', rid: 30, action: { type: 'volume', op: 'set', value: vol } }); // set to current: no audible change
+    m = await c3.next((x) => x.t === 'result' && x.rid === 30); assert.ok(m.ok);
+    console.log('ok stats + volume (' + vol + '%)');
+  }
+
   // persisted
   const saved = JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8'));
-  assert.strictEqual(saved.pages.home.buttons[15].id, 'testbtn');
+  assert.strictEqual(saved.pages.streaming.buttons[10].id, 'testbtn');
   console.log('ok persistence');
   console.log('ALL PASSED');
 })()

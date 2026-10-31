@@ -1,0 +1,17 @@
+{
+  "name": "deckpad-companion",
+  "version": "1.0.0",
+  "description": "PC companion for the DeckPad phone app: executes hotkeys, launches apps, controls OBS.",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node test/protocol.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "qrcode-terminal": "^0.12.0",
+    "ws": "^8.18.0"
+  }
+}

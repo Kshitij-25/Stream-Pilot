@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../connection.dart';
 import '../models.dart';
+import '../theme.dart';
 import 'deck_icon.dart';
 
 class DeckTile extends StatefulWidget {
@@ -44,11 +45,11 @@ class _DeckTileState extends State<DeckTile> {
         onTap: widget.editing ? widget.onTap : null,
         child: Container(
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            color: widget.editing ? Colors.white.withValues(alpha: 0.04) : Colors.black26,
-            border: Border.all(color: widget.editing ? Colors.white24 : Colors.white10),
+            borderRadius: BorderRadius.circular(16),
+            color: widget.editing ? kSurface : Colors.transparent,
+            border: Border.all(color: widget.editing ? kBorder2 : const Color(0xFF17171A)),
           ),
-          child: widget.editing ? const Center(child: Icon(Icons.add, color: Colors.white38)) : null,
+          child: widget.editing ? const Center(child: Icon(Icons.add, color: kMuted, size: 20)) : null,
         ),
       );
     }
@@ -59,11 +60,15 @@ class _DeckTileState extends State<DeckTile> {
     final label = active && (b.labelOn ?? '').isNotEmpty ? b.labelOn! : b.label;
     final icon = active && (b.iconOn ?? '').isNotEmpty ? b.iconOn! : b.icon;
     final showImage = !(active && (b.iconOn ?? '').isNotEmpty);
+    final hue = accentFor(parseColor(colorHex));
 
-    final base = parseColor(colorHex);
-    final hsl = HSLColor.fromColor(base);
-    final top = hsl.withLightness((hsl.lightness + 0.08).clamp(0, 1)).toColor();
-    final bottom = hsl.withLightness((hsl.lightness - 0.08).clamp(0, 1)).toColor();
+    final borderColor = widget.error
+        ? kLive
+        : active
+            ? hue.withValues(alpha: 0.6)
+            : widget.editing
+                ? Colors.white30
+                : kBorder;
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -73,26 +78,34 @@ class _DeckTileState extends State<DeckTile> {
       onTap: widget.onTap,
       onLongPress: widget.editing ? null : widget.onLongPress,
       onDoubleTap: widget.editing ? null : widget.onDoubleTap,
-      child: AnimatedScale(
-        scale: _down ? 0.94 : 1,
-        duration: const Duration(milliseconds: 80),
-        child: Container(
+      // A raised key: gradient face, hard bottom lip, soft drop shadow. Pressing sinks it ~3px and flattens the shadow.
+      child: AnimatedSlide(
+        offset: Offset(0, _down ? 0.03 : 0),
+        duration: const Duration(milliseconds: 70),
+        curve: Curves.easeOut,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 70),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [top, bottom]),
-            border: Border.all(
-              color: widget.error
-                  ? Colors.redAccent
-                  : active
-                      ? Colors.white
-                      : widget.editing
-                          ? Colors.white54
-                          : Colors.white12,
-              width: active || widget.error ? 3 : 1,
+            borderRadius: BorderRadius.circular(16),
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: active
+                  ? [hue.withValues(alpha: 0.23), hue.withValues(alpha: 0.09)]
+                  : const [Color(0xFF202025), Color(0xFF131316)],
             ),
-            boxShadow: active ? [BoxShadow(color: base.withValues(alpha: 0.8), blurRadius: 14)] : null,
+            border: Border.all(color: active || widget.error || widget.editing ? borderColor : const Color(0xFF2A2A30), width: widget.error ? 1.5 : 1),
+            boxShadow: _down
+                ? const [BoxShadow(color: Color(0xFF040405), offset: Offset(0, 1), blurRadius: 2)]
+                : [
+                    const BoxShadow(color: Color(0xFF040405), offset: Offset(0, 3)),
+                    if (active)
+                      BoxShadow(color: hue.withValues(alpha: 0.25), blurRadius: 16)
+                    else
+                      const BoxShadow(color: Color(0x73000000), offset: Offset(0, 7), blurRadius: 12),
+                  ],
           ),
-          padding: const EdgeInsets.all(5),
+          padding: const EdgeInsets.all(6),
           child: Stack(
             children: [
               Center(
@@ -103,31 +116,32 @@ class _DeckTileState extends State<DeckTile> {
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            if (icon.isNotEmpty || (showImage && (b.image ?? '').isNotEmpty))
-                              DeckIcon(icon: icon, image: showImage ? b.image : null, size: 34),
-                            if (label.isNotEmpty)
+                            if (icon.isNotEmpty || (showImage && (b.image ?? '').isNotEmpty)) DeckIcon(icon: icon, image: showImage ? b.image : null, size: 28, color: hue),
+                            if (label.isNotEmpty) ...[
+                              const SizedBox(height: 8),
                               ConstrainedBox(
-                                constraints: const BoxConstraints(maxWidth: 110),
+                                constraints: const BoxConstraints(maxWidth: 96),
                                 child: Text(
                                   label,
                                   maxLines: 2,
                                   textAlign: TextAlign.center,
                                   overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white),
+                                  style: TextStyle(fontSize: 11, height: 1.15, fontWeight: FontWeight.w500, letterSpacing: 0.1, color: active ? kText : const Color(0xFFA6A6AF)),
                                 ),
                               ),
+                            ],
                           ],
                         ),
                       ),
               ),
               if (widget.busy)
                 const Positioned(
-                  top: 0,
-                  right: 0,
-                  child: SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+                  top: 2,
+                  right: 2,
+                  child: SizedBox(width: 11, height: 11, child: CircularProgressIndicator(strokeWidth: 1.6, color: kMuted)),
                 ),
               if (widget.editing)
-                const Positioned(top: 0, right: 0, child: Icon(Icons.drag_indicator, size: 14, color: Colors.white54)),
+                const Positioned(top: 1, right: 1, child: Icon(Icons.drag_indicator, size: 13, color: kMuted)),
             ],
           ),
         ),
@@ -260,9 +274,9 @@ class _LiveWidgetState extends State<LiveWidget> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(value, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: Colors.white, fontFeatures: [FontFeature.tabularFigures()])),
+          Text(value, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w500, letterSpacing: -0.5, color: kText, fontFeatures: [FontFeature.tabularFigures()])),
           if (caption.isNotEmpty)
-            Text(caption, style: const TextStyle(fontSize: 12, color: Colors.white70)),
+            Text(caption, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w500, color: kMuted)),
         ],
       ),
     );

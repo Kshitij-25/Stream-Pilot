@@ -53,7 +53,7 @@ void main() {
     // Dynamic: streaming button shows its active look (End Stream), live timer ticks.
     expect(find.text('End Stream'), findsOneWidget);
     expect(find.text('00:01:05'), findsOneWidget);
-    expect(find.text('LIVE'), findsWidgets);
+    expect(find.text('Live'), findsWidgets);
 
     // Keys are square and fit the screen height.
     final size = tester.getSize(find.byType(DeckScreen));
@@ -117,7 +117,8 @@ void main() {
     await tester.pumpWidget(_app(c));
     await tester.tap(find.byIcon(Icons.edit_outlined));
     await tester.pump();
-    expect(find.text('Add', skipOffstage: false), findsOneWidget);
+    await tester.dragUntilVisible(find.text('Add'), find.byType(ListView).first, const Offset(0, -80));
+    expect(find.text('Add'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../connection.dart';
 import '../models.dart';
+import '../theme.dart';
 
 /// Faders for the PC master volume, each app playing audio, and OBS audio inputs.
 class MixerScreen extends StatefulWidget {
@@ -126,7 +127,7 @@ class _Section extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(4, 12, 4, 4),
-        child: Text(text, style: Theme.of(context).textTheme.labelLarge?.copyWith(color: Theme.of(context).colorScheme.primary)),
+        padding: const EdgeInsets.fromLTRB(4, 20, 4, 6),
+        child: Text(text.toUpperCase(), style: sectionStyle()),
       );
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../connection.dart';
+import '../theme.dart';
 import '../models.dart';
 import '../widgets/deck_icon.dart';
 import '../widgets/deck_tile.dart';
@@ -171,33 +172,11 @@ class _DeckScreenState extends State<DeckScreen> {
       cell: (slot) => _cell(conn, cfg, pageId, slot),
     );
 
-    final hint = _editing
-        ? Container(
-            width: double.infinity,
-            color: Theme.of(context).colorScheme.primaryContainer,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
-            child: Text(
-              'Edit mode: tap a slot to edit, long-press to drag. Long-press a screen to rename or delete it.',
-              style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onPrimaryContainer),
-            ),
-          )
-        : null;
+    final hint = _editing ? const _Strip('Edit mode: tap a slot to edit, long-press to drag. Long-press a screen to rename it.', kAccent) : null;
     final outdated = conn.outdatedCompanion
-        ? Container(
-            width: double.infinity,
-            color: Colors.red.shade900,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            child: const Text('Your PC companion is outdated. Close it, update the server folder and restart it (npm start) to get volume, integrations and the new screens.', style: TextStyle(fontSize: 11)),
-          )
+        ? const _Strip('Your PC companion is outdated. Close it, update the server folder and restart it (npm start).', kLive)
         : null;
-    final offline = !conn.connected
-        ? Container(
-            width: double.infinity,
-            color: Colors.orange.shade900,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
-            child: Text('Reconnecting to ${conn.host}…', style: const TextStyle(fontSize: 11)),
-          )
-        : null;
+    final offline = !conn.connected ? _Strip('Reconnecting to ${conn.host}…', const Color(0xFFFFB86B)) : null;
 
     final tabs = [
       for (final s in cfg.screens)
@@ -218,7 +197,7 @@ class _DeckScreenState extends State<DeckScreen> {
         if (!didPop && _stack.isNotEmpty) setState(() => _stack.removeLast());
       },
       child: Scaffold(
-        backgroundColor: const Color(0xFF08080B),
+        backgroundColor: kBg,
         body: SafeArea(
           child: landscape
               ? Row(children: [
@@ -232,7 +211,7 @@ class _DeckScreenState extends State<DeckScreen> {
                     obs: conn.obs,
                     offline: !conn.connected,
                   ),
-                  Expanded(child: Column(children: [?outdated, ?offline, ?hint, Expanded(child: grid)])),
+                  Expanded(child: Column(children: [?outdated, ?offline, ?hint, _PageHeader(title: page.name, obs: conn.obs, conn: conn), Expanded(child: grid)])),
                 ])
               : Column(children: [
                   _TopBar(
@@ -244,8 +223,10 @@ class _DeckScreenState extends State<DeckScreen> {
                     onSettings: _openSettings,
                     obs: conn.obs,
                     offline: !conn.connected,
+                    subtitle: conn.hostName.isEmpty ? conn.host : conn.hostName,
+                    conn: conn,
                   ),
-                  SizedBox(height: 54, child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 8), children: tabs)),
+                  Container(height: 42, margin: const EdgeInsets.only(top: 14), decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFF1C1C20)))), child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 20), children: tabs)),
                   ?outdated,
                   ?offline,
                   ?hint,
@@ -290,7 +271,7 @@ class _DeckScreenState extends State<DeckScreen> {
   }
 }
 
-/// Hardware-style key matrix: square keys, centred, as large as the space allows.
+/// Key matrix: square keys, centred, as large as the space allows.
 class _Grid extends StatelessWidget {
   final DeckConfig cfg;
   final Widget Function(int slot) cell;
@@ -299,40 +280,53 @@ class _Grid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, box) {
-      const gap = 8.0;
-      final w = (box.maxWidth - 16 - gap * (cfg.cols - 1)) / cfg.cols;
-      final h = (box.maxHeight - 16 - gap * (cfg.rows - 1)) / cfg.rows;
+      const gap = 10.0;
+      const rowGap = 13.0; // room for each key's bottom lip
+      const pad = 12.0;
+      final w = (box.maxWidth - pad * 2 - gap * (cfg.cols - 1)) / cfg.cols;
+      final h = (box.maxHeight - pad * 2 - rowGap * (cfg.rows - 1)) / cfg.rows;
       final size = w < h ? w : h;
       if (size <= 0) return const SizedBox.shrink();
       return Center(
-        child: Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(color: const Color(0xFF15151B), borderRadius: BorderRadius.circular(16)),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (var r = 0; r < cfg.rows; r++)
-                Padding(
-                  padding: EdgeInsets.only(top: r == 0 ? 0 : gap),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      for (var c = 0; c < cfg.cols; c++)
-                        Padding(
-                          padding: EdgeInsets.only(left: c == 0 ? 0 : gap),
-                          child: SizedBox(width: size, height: size, child: cell(r * cfg.cols + c)),
-                        ),
-                    ],
-                  ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (var r = 0; r < cfg.rows; r++)
+              Padding(
+                padding: EdgeInsets.only(top: r == 0 ? 0 : rowGap),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (var c = 0; c < cfg.cols; c++)
+                      Padding(
+                        padding: EdgeInsets.only(left: c == 0 ? 0 : gap),
+                        child: SizedBox(width: size, height: size, child: cell(r * cfg.cols + c)),
+                      ),
+                  ],
                 ),
-            ],
-          ),
+              ),
+          ],
         ),
       );
     });
   }
 }
 
+class _Strip extends StatelessWidget {
+  final String text;
+  final Color color;
+  const _Strip(this.text, this.color);
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        color: color.withValues(alpha: 0.12),
+        child: Text(text, style: TextStyle(fontSize: 11.5, color: color)),
+      );
+}
+
+/// One screen in the switcher: icon + label in the landscape rail, text with underline in portrait.
 class _Tab extends StatelessWidget {
   final DeckPage? page;
   final bool selected;
@@ -348,33 +342,41 @@ class _Tab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
     final p = page;
-    final icon = p == null ? const Icon(Icons.add, size: 22) : (p.icon.isEmpty ? const Icon(Icons.dashboard, size: 22) : DeckIcon(icon: p.icon, size: 22));
     final label = p?.name ?? 'Add';
-    final decoration = BoxDecoration(
-      color: selected ? cs.primaryContainer : Colors.white.withValues(alpha: 0.05),
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: selected ? cs.primary : Colors.transparent),
-    );
-    final child = vertical
-        ? Column(mainAxisSize: MainAxisSize.min, children: [
-            icon,
-            const SizedBox(height: 2),
-            Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10)),
-          ])
-        : Row(mainAxisSize: MainAxisSize.min, children: [icon, const SizedBox(width: 6), Text(label, style: const TextStyle(fontSize: 13))]);
-    return Padding(
-      padding: vertical ? const EdgeInsets.symmetric(vertical: 2, horizontal: 6) : const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+    final color = selected ? kAccent : const Color(0xFF7D7D86);
+
+    if (!vertical) {
+      return InkWell(
         onTap: onTap,
         onLongPress: onLongPress,
         child: Container(
-          width: vertical ? double.infinity : null,
-          padding: vertical ? const EdgeInsets.symmetric(vertical: 5, horizontal: 2) : const EdgeInsets.symmetric(horizontal: 12),
-          decoration: decoration,
-          child: child,
+          margin: const EdgeInsets.only(right: 22),
+          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: selected ? kAccent : Colors.transparent, width: 2))),
+          alignment: Alignment.center,
+          child: Text(label, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: selected ? kText : const Color(0xFF7D7D86))),
+        ),
+      );
+    }
+
+    final icon = p == null ? Icon(Icons.add, size: 20, color: color) : (p.icon.isEmpty ? Icon(Icons.dashboard_outlined, size: 20, color: color) : DeckIcon(icon: p.icon, size: 20, color: color));
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 8),
+      child: Material(
+        color: selected ? kSurface2 : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          onLongPress: onLongPress,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 7),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              icon,
+              const SizedBox(height: 3),
+              Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 9.5, letterSpacing: 0.2, color: color)),
+            ]),
+          ),
         ),
       ),
     );
@@ -404,39 +406,48 @@ class _Rail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    Widget tool(IconData i, String tip, VoidCallback f, {Color color = kMuted}) =>
+        IconButton(icon: Icon(i, size: 19, color: color), tooltip: tip, visualDensity: VisualDensity.compact, onPressed: f);
+    final conn = ConnScope.of(context);
     return Container(
-      width: 84,
-      color: const Color(0xFF101015),
+      width: 68,
+      decoration: const BoxDecoration(border: Border(right: BorderSide(color: Color(0xFF1C1C20)))),
       child: Column(
         children: [
-          const SizedBox(height: 6),
-          Icon(Icons.circle, size: 9, color: offline ? Colors.orange : Colors.greenAccent),
-          if (inFolder)
-            IconButton(icon: const Icon(Icons.arrow_back), tooltip: 'Back', visualDensity: VisualDensity.compact, onPressed: onBack)
-          else
-            const SizedBox(height: 4),
+          const SizedBox(height: 12),
+          Container(width: 6, height: 6, decoration: BoxDecoration(shape: BoxShape.circle, color: offline ? const Color(0xFFFFB86B) : kOk)),
+          if (inFolder) tool(Icons.arrow_back, 'Back', onBack) else const SizedBox(height: 10),
           Expanded(child: ListView(padding: EdgeInsets.zero, children: tabs)),
-          if (obs.streaming) const _Badge('LIVE', Colors.red),
-          if (obs.recording) const _Badge('REC', Colors.pink),
-          Builder(builder: (context) {
-            final conn = ConnScope.of(context);
-            return TextButton.icon(
-              style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 6), minimumSize: const Size(0, 30), visualDensity: VisualDensity.compact),
-              onPressed: () => showProfileSheet(context),
-              icon: Icon(conn.following ? Icons.layers : Icons.push_pin, size: 14),
-              label: Text(conn.profileName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10)),
-            );
-          }),
-          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            IconButton(
-              icon: Icon(editing ? Icons.check_circle : Icons.edit_outlined),
-              tooltip: editing ? 'Done editing' : 'Edit buttons',
-              visualDensity: VisualDensity.compact,
-              onPressed: onToggleEdit,
-            ),
-            IconButton(icon: const Icon(Icons.settings_outlined), tooltip: 'Settings', visualDensity: VisualDensity.compact, onPressed: onSettings),
-          ]),
+          tool(conn.following ? Icons.layers_outlined : Icons.push_pin_outlined, 'Profile: ${conn.profileName}', () => showProfileSheet(context)),
+          tool(editing ? Icons.check_circle_outline : Icons.edit_outlined, editing ? 'Done editing' : 'Edit buttons', onToggleEdit, color: editing ? kAccent : kMuted),
+          tool(Icons.tune, 'Settings', onSettings),
+          const SizedBox(height: 4),
         ],
+      ),
+    );
+  }
+}
+
+/// Landscape: slim title line above the keys with live status pills.
+class _PageHeader extends StatelessWidget {
+  final String title;
+  final ObsState obs;
+  final DeckConnection conn;
+  const _PageHeader({required this.title, required this.obs, required this.conn});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
+      child: SizedBox(
+        height: 26,
+        child: Row(children: [
+          Expanded(child: Text(title, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, letterSpacing: -0.1))),
+          if (obs.streaming) const _Pill('Live', kLive, dot: true),
+          if (obs.recording) const _Pill('Rec', Color(0xFFFF7AA8), dot: true),
+          if (!obs.connected && conn.connected) const _Pill('OBS offline', kMuted),
+          _Pill(conn.profileName, kMuted),
+        ]),
       ),
     );
   }
@@ -444,6 +455,7 @@ class _Rail extends StatelessWidget {
 
 class _TopBar extends StatelessWidget {
   final String title;
+  final String subtitle;
   final bool canGoBack;
   final VoidCallback onBack;
   final bool editing;
@@ -451,9 +463,11 @@ class _TopBar extends StatelessWidget {
   final VoidCallback onSettings;
   final ObsState obs;
   final bool offline;
+  final DeckConnection conn;
 
   const _TopBar({
     required this.title,
+    required this.subtitle,
     required this.canGoBack,
     required this.onBack,
     required this.editing,
@@ -461,49 +475,54 @@ class _TopBar extends StatelessWidget {
     required this.onSettings,
     required this.obs,
     required this.offline,
+    required this.conn,
   });
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 44,
-      child: Row(
-        children: [
-          if (canGoBack)
-            IconButton(icon: const Icon(Icons.arrow_back), onPressed: onBack, visualDensity: VisualDensity.compact)
-          else
-            const SizedBox(width: 12),
-          Icon(Icons.circle, size: 10, color: offline ? Colors.orange : Colors.greenAccent),
-          const SizedBox(width: 8),
-          Expanded(child: Text(title, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.titleMedium)),
-          if (obs.streaming) const _Badge('LIVE', Colors.red),
-          if (obs.recording) const _Badge('REC', Colors.pink),
-          if (!obs.connected && !offline) const _Badge('OBS offline', Colors.grey),
-          IconButton(icon: const Icon(Icons.layers_outlined), tooltip: 'Profile', onPressed: () => showProfileSheet(context)),
-          IconButton(
-            icon: Icon(editing ? Icons.check_circle : Icons.edit_outlined),
-            tooltip: editing ? 'Done editing' : 'Edit buttons',
-            onPressed: onToggleEdit,
-          ),
-          IconButton(icon: const Icon(Icons.settings_outlined), tooltip: 'Settings', onPressed: onSettings),
-        ],
-      ),
+    Widget tool(IconData i, String tip, VoidCallback f, {Color color = kMuted}) => IconButton(icon: Icon(i, size: 20, color: color), tooltip: tip, onPressed: f);
+    return Padding(
+      padding: EdgeInsets.fromLTRB(canGoBack ? 8 : 20, 14, 8, 0),
+      child: Row(children: [
+        if (canGoBack) IconButton(icon: const Icon(Icons.arrow_back), onPressed: onBack),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Container(width: 6, height: 6, decoration: BoxDecoration(shape: BoxShape.circle, color: offline ? const Color(0xFFFFB86B) : kOk)),
+              const SizedBox(width: 7),
+              Flexible(child: Text(subtitle, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: kMuted))),
+            ]),
+            const SizedBox(height: 2),
+            Text(title, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w600, letterSpacing: -0.8)),
+          ]),
+        ),
+        if (obs.streaming) const _Pill('Live', kLive, dot: true),
+        if (obs.recording) const _Pill('Rec', Color(0xFFFF7AA8), dot: true),
+        tool(Icons.layers_outlined, 'Profile: ${conn.profileName}', () => showProfileSheet(context)),
+        tool(editing ? Icons.check_circle_outline : Icons.edit_outlined, editing ? 'Done editing' : 'Edit buttons', onToggleEdit, color: editing ? kAccent : kMuted),
+        tool(Icons.tune, 'Settings', onSettings),
+      ]),
     );
   }
 }
 
-class _Badge extends StatelessWidget {
+class _Pill extends StatelessWidget {
   final String text;
   final Color color;
-  const _Badge(this.text, this.color);
+  final bool dot;
+  const _Pill(this.text, this.color, {this.dot = false});
 
   @override
   Widget build(BuildContext context) {
+    final strong = dot;
     return Container(
-      margin: const EdgeInsets.only(right: 6, bottom: 4),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(10)),
-      child: Text(text, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+      margin: const EdgeInsets.only(left: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+      decoration: BoxDecoration(color: strong ? color.withValues(alpha: 0.14) : kSurface2, borderRadius: BorderRadius.circular(12)),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        if (dot) ...[Container(width: 6, height: 6, decoration: BoxDecoration(shape: BoxShape.circle, color: color)), const SizedBox(width: 6)],
+        Text(text, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: strong ? color : kMuted)),
+      ]),
     );
   }
 }

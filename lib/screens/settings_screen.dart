@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../connection.dart';
+import '../theme.dart';
 import '../widgets/page_dialog.dart';
 import '../tools/tools.dart';
 import '../models.dart';
@@ -291,8 +292,8 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-        child: Text(text, style: Theme.of(context).textTheme.labelLarge?.copyWith(color: Theme.of(context).colorScheme.primary)),
+        padding: const EdgeInsets.fromLTRB(16, 18, 16, 6),
+        child: Text(text.toUpperCase(), style: sectionStyle()),
       );
 }
 

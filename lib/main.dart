@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'connection.dart';
+import 'theme.dart';
 import 'screens/connect_screen.dart';
 import 'screens/deck_screen.dart';
 
@@ -23,13 +24,7 @@ class DeckPadApp extends StatelessWidget {
         title: 'DeckPad',
         debugShowCheckedModeBanner: false,
         themeMode: ThemeMode.dark,
-        darkTheme: ThemeData(
-          useMaterial3: true,
-          brightness: Brightness.dark,
-          colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF7C4DFF), brightness: Brightness.dark),
-          scaffoldBackgroundColor: const Color(0xFF0E0E12),
-          inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder()),
-        ),
+        darkTheme: buildTheme(),
         home: const _Root(),
       ),
     );
